@@ -44,7 +44,7 @@ function parseImportDate(value) {
   // Excel serial dates occasionally arrive as numeric cells.
   if (/^\d+(?:\.\d+)?$/.test(text)) {
     const serial = Number(text)
-    if (serial >= 1 && serial <= 2958465) {
+    if (serial >= 20000 && serial <= 2958465) {
       const wholeDays = Math.floor(serial)
       const excelEpoch = new Date(1899, 11, 30)
       excelEpoch.setDate(excelEpoch.getDate() + wholeDays)
