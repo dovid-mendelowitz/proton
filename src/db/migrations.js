@@ -23,6 +23,7 @@ function runMigrations(db) {
     ['Automation_Rules', 'valid_from', 'TEXT'],
     ['Automation_Rules', 'valid_to', 'TEXT'],
     ['Automation_Rules', 'enabled', 'INTEGER NOT NULL DEFAULT 1'],
+    ['Recurring_Templates', 'season_months', 'TEXT'],
     ['Accounts', 'billing_day', 'INTEGER'],
     ['Accounts', 'settlement_account_id', 'INTEGER REFERENCES Accounts(id)'],
     ['Accounts', 'current_balance', 'REAL'],
