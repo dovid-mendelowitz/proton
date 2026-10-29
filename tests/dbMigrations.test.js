@@ -26,10 +26,12 @@ test('repairs missing columns in a fresh/minimal schema', () => {
     const accountColumns = db.prepare('PRAGMA table_info(Accounts)').all().map(c => c.name)
     const assetColumns = db.prepare('PRAGMA table_info(Assets)').all().map(c => c.name)
     const ruleColumns = db.prepare('PRAGMA table_info(Automation_Rules)').all().map(c => c.name)
+    const recurringColumns = db.prepare('PRAGMA table_info(Recurring_Templates)').all().map(c => c.name)
 
     for (const column of ['value_date', 'import_id', 'settles_credit_card_id', 'parent_id', 'offset_group_id', 'insurance_id', 'liability_id', 'recurring_id', 'savings_goal_id']) {
       assert.ok(txColumns.includes(column), `Transactions.${column} should exist`)
     }
+    assert.ok(recurringColumns.includes('season_months'), 'Recurring_Templates.season_months should exist')
     for (const column of ['account_id', 'min_amount', 'max_amount', 'valid_from', 'valid_to', 'enabled']) {
       assert.ok(ruleColumns.includes(column), `Automation_Rules.${column} should exist`)
     }
