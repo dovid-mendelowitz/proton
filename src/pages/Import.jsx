@@ -3,7 +3,7 @@ const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
 const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
-const { filterEligibleRules } = require('../lib/transactionRules.js')
+const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -100,59 +100,14 @@ function saveMapping(accountKey, mapping, headers) {
 
 function findBestRule(businessEntity, context = {}) {
   if (!businessEntity) return null
-  const name = businessEntity.toLowerCase().trim()
   const rules = db.prepare(`
     SELECT r.*, c.name as category_name FROM Automation_Rules r
     LEFT JOIN Categories c ON r.category_id=c.id
     WHERE r.match_type NOT IN ('mapping','setting')
-    AND r.category_id IS NOT NULL
-    AND COALESCE(r.enabled, 1) = 1
+      AND r.category_id IS NOT NULL
+      AND COALESCE(r.enabled, 1) = 1
   `).all()
-  if (rules.length === 0) return null
-
-  const eligibleRules = filterEligibleRules(rules, context)
-  if (eligibleRules.length === 0) return null
-
-  // שלב 1 — התאמה מדויקת
-  const exactMatches = eligibleRules.filter(r => r.original_string.toLowerCase() === name)
-  if (exactMatches.length === 1) return exactMatches[0]
-  if (exactMatches.length > 1) return exactMatches.sort((a, b) => b.use_count - a.use_count)[0]
-
-  // שלב 2 — התאמה חלקית לפי מילים
-  const stopWords = ['בעמ', 'בע"מ', 'חברה', 'עוסק', 'מורשה', 'בע', 'של', 'את', 'על', 'עם', 'ltd', 'inc']
-  const getWords = str => str.toLowerCase()
-    .replace(/[^א-תa-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.includes(w))
-
-  const currentWords = getWords(name)
-  if (currentWords.length === 0) return null
-
-  let scores = {}
-  let ruleMap = {}
-  for (const rule of eligibleRules) {
-    const ruleWords = getWords(rule.original_string)
-    const matches = currentWords.filter(cw => 
-      ruleWords.some(rw => 
-        rw.includes(cw) || 
-        cw.includes(rw) ||
-        (cw.length >= 4 && rw.length >= 4 && (rw.startsWith(cw.slice(0, 4)) || cw.startsWith(rw.slice(0, 4))))
-      )
-    )
-    if (matches.length > 0) {
-      const key = rule.category_id
-      // צבור ניקוד מכל החוקים לאותה קטגוריה
-      scores[key] = (scores[key] || 0) + matches.length * (rule.use_count || 1)
-      // שמור את החוק עם הניקוד הגבוה ביותר לייצוג
-      if (!ruleMap[key] || matches.length * (rule.use_count || 1) > (ruleMap[key]._score || 0)) {
-        ruleMap[key] = { ...rule, _score: matches.length * (rule.use_count || 1) }
-      }
-    }
-  }
-
-  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1])
-  if (sorted.length > 0) return ruleMap[parseInt(sorted[0][0])]
-  return null
+  return findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
 }
 
 function Import({ onNavigate }) {
