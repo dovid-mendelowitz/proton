@@ -3,7 +3,7 @@ const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
 const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
-const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
+const { findScopedMerchantRule } = require('../lib/transactionRules.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -107,12 +107,7 @@ function findBestRule(businessEntity, context = {}) {
       AND r.category_id IS NOT NULL
       AND COALESCE(r.enabled, 1) = 1
   `).all()
-  const rule = findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
-  if (rule) return { rule, outOfScope: false }
-  return {
-    rule: null,
-    outOfScope: Boolean(findBestMerchantRule(businessEntity, rules)),
-  }
+  return findScopedMerchantRule(businessEntity, rules, context)
 }
 
 function Import({ onNavigate }) {
