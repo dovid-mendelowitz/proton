@@ -329,7 +329,7 @@ function Import({ onNavigate }) {
       let categoryName = null
       let autoDetected = false
       if (rawBusiness) {
-        const rule = findBestRule(rawBusiness, { accountId, amount, date: rawDate })
+        const rule = findBestRule(rawBusiness, { accountId, amount, date: parseDate(rawDateStr) || null })
         if (rule) {
           categoryId = rule.category_id
           categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null
