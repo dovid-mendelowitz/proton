@@ -5,6 +5,7 @@ const { getDateColumn } = require('../db/index.js')
 const { getScopeRange } = require('../lib/viewScope.js')
 const { addMonthsClamped, parseLocalDate } = require('../lib/dateUtils.js')
 const { generateAmortization } = require('../lib/loanAmortization.js')
+const { filterEligibleRules } = require('../lib/transactionRules.js')
 
 function generateVirtualTransactions() {
   const virtual = []
@@ -1103,10 +1104,14 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
       .map(w => w.startsWith('ה') && w.length > 3 ? w.slice(1) : w)
 
     const name = businessEntity.toLowerCase().trim()
-    const rules = db.prepare(`
+    const rules = filterEligibleRules(db.prepare(`
       SELECT * FROM Automation_Rules
       WHERE match_type NOT IN ('setting','mapping') AND category_id IS NOT NULL
-    `).all()
+    `).all(), {
+      accountId: form.account_id,
+      amount: form.amount === '' ? null : Number(form.amount),
+      date: form.transaction_date || null,
+    })
 
     if (rules.length === 0) return
 
