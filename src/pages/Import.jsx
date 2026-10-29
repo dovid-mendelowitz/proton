@@ -97,7 +97,7 @@ function saveMapping(accountKey, mapping, headers) {
   } catch {}
 }
 
-function findBestRule(businessEntity) {
+function findBestRule(businessEntity, context = {}) {
   if (!businessEntity) return null
   const name = businessEntity.toLowerCase().trim()
   const rules = db.prepare(`
@@ -105,11 +105,22 @@ function findBestRule(businessEntity) {
     LEFT JOIN Categories c ON r.category_id=c.id
     WHERE r.match_type NOT IN ('mapping','setting')
     AND r.category_id IS NOT NULL
+    AND COALESCE(r.enabled, 1) = 1
   `).all()
   if (rules.length === 0) return null
 
+  const eligibleRules = rules.filter(rule => {
+    if (rule.account_id != null && (!context.accountId || Number(rule.account_id) !== Number(context.accountId))) return false
+    if (rule.min_amount != null && (context.amount == null || context.amount < rule.min_amount)) return false
+    if (rule.max_amount != null && (context.amount == null || context.amount > rule.max_amount)) return false
+    if (rule.valid_from && (!context.date || context.date < rule.valid_from)) return false
+    if (rule.valid_to && (!context.date || context.date > rule.valid_to)) return false
+    return true
+  })
+  if (eligibleRules.length === 0) return null
+
   // שלב 1 — התאמה מדויקת
-  const exactMatches = rules.filter(r => r.original_string.toLowerCase() === name)
+  const exactMatches = eligibleRules.filter(r => r.original_string.toLowerCase() === name)
   if (exactMatches.length === 1) return exactMatches[0]
   if (exactMatches.length > 1) return exactMatches.sort((a, b) => b.use_count - a.use_count)[0]
 
@@ -125,7 +136,7 @@ function findBestRule(businessEntity) {
 
   let scores = {}
   let ruleMap = {}
-  for (const rule of rules) {
+  for (const rule of eligibleRules) {
     const ruleWords = getWords(rule.original_string)
     const matches = currentWords.filter(cw => 
       ruleWords.some(rw => 
@@ -318,7 +329,7 @@ function Import({ onNavigate }) {
       let categoryName = null
       let autoDetected = false
       if (rawBusiness) {
-        const rule = findBestRule(rawBusiness)
+        const rule = findBestRule(rawBusiness, { accountId, amount, date: rawDate })
         if (rule) {
           categoryId = rule.category_id
           categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null
