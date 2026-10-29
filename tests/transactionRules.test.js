@@ -54,3 +54,19 @@ test('allows a strong unique token match but not arbitrary substring matches', (
     { original_string: 'ACME Store', category_id: 4 },
   ]), null)
 })
+
+test('distinguishes an out-of-scope known merchant from an unknown merchant', () => {
+  const { findScopedMerchantRule } = require('../src/lib/transactionRules')
+  const rules = [
+    { original_string: 'ACME Store', category_id: 4, min_amount: 100, enabled: 1 },
+  ]
+  assert.deepEqual(findScopedMerchantRule('ACME Store', rules, { amount: 150 }), {
+    rule: { ...rules[0], _matchScore: 1 }, outOfScope: false,
+  })
+  assert.deepEqual(findScopedMerchantRule('ACME Store', rules, { amount: 50 }), {
+    rule: null, outOfScope: true,
+  })
+  assert.deepEqual(findScopedMerchantRule('Different Merchant', rules, { amount: 50 }), {
+    rule: null, outOfScope: false,
+  })
+})
