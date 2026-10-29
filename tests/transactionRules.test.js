@@ -24,3 +24,33 @@ test('disabled rules never match; unscoped rules remain eligible', () => {
   assert.equal(ruleMatchesContext({}, {}), true)
   assert.deepEqual(filterEligibleRules([{ enabled: 0 }, {}, { account_id: 2 }], {}), [{}])
 })
+
+test('finds exact merchant rules without letting usage count override the match', () => {
+  const { findBestMerchantRule } = require('../src/lib/transactionRules')
+  const rules = [
+    { original_string: 'supermarket alpha', category_id: 1, use_count: 99 },
+    { original_string: 'supermarket beta', category_id: 2, use_count: 1 },
+  ]
+  assert.equal(findBestMerchantRule('Supermarket Beta', rules).category_id, 2)
+})
+
+test('returns no suggestion when fuzzy matches are weak or ambiguous', () => {
+  const { findBestMerchantRule } = require('../src/lib/transactionRules')
+  assert.equal(findBestMerchantRule('random unrelated merchant', [
+    { original_string: 'alpha store', category_id: 1 },
+  ]), null)
+  assert.equal(findBestMerchantRule('supermarket alpha', [
+    { original_string: 'supermarket alpha', category_id: 1 },
+    { original_string: 'supermarket alpha', category_id: 2 },
+  ]), null)
+})
+
+test('allows a strong unique token match but not arbitrary substring matches', () => {
+  const { findBestMerchantRule } = require('../src/lib/transactionRules')
+  assert.equal(findBestMerchantRule('ACME Store 123', [
+    { original_string: 'ACME Store', category_id: 4 },
+  ]).category_id, 4)
+  assert.equal(findBestMerchantRule('cme', [
+    { original_string: 'ACME Store', category_id: 4 },
+  ]), null)
+})
