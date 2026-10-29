@@ -174,6 +174,7 @@ function Transactions({ viewScope, setViewScope }) {
     setEditForm({
       transaction_date: tx.transaction_date,
       value_date: tx.value_date || '',
+      transaction_type: tx.transaction_type,
       amount: tx.amount.toString(),
       business_entity: tx.business_entity || '',
       category_id: tx.category_parent_id ? tx.category_parent_id.toString() : (tx.category_id?.toString() ?? ''),
