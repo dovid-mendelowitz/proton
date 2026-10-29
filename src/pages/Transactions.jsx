@@ -5,6 +5,8 @@ const { getDateColumn } = require('../db/index.js')
 const { getScopeRange } = require('../lib/viewScope.js')
 const { addMonthsClamped, parseLocalDate } = require('../lib/dateUtils.js')
 const { generateAmortization } = require('../lib/loanAmortization.js')
+const { generateRecurringDates } = require('../lib/recurringSchedule.js')
+const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
 
 function generateVirtualTransactions() {
   const virtual = []
@@ -47,15 +49,10 @@ function generateVirtualTransactions() {
     const today = new Date()
 
     for (const t of templates) {
-      // עוגן: יום החיוב כפי שחל בחודש הנוכחי (עם clamp אם החודש הנוכחי קצר מדי)
-      const chargeDay = t.charge_day || 1
-      const anchor = new Date(today.getFullYear(), today.getMonth(), 1)
-      anchor.setDate(Math.min(chargeDay, new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate()))
+      const schedule = generateRecurringDates(t, today, 12)
 
-      // צור תנועות ל-12 חודשים קדימה
-      for (let i = 0; i < 12; i++) {
-        const date = addMonthsClamped(anchor, i)
-        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      for (let i = 0; i < schedule.length; i++) {
+        const dateStr = schedule[i]
         const monthStr = dateStr.slice(0, 7)
 
         // בדוק אם כבר יש תנועה אמיתית מהתבנית לחודש הזה
@@ -173,6 +170,7 @@ function Transactions({ viewScope, setViewScope }) {
     setEditForm({
       transaction_date: tx.transaction_date,
       value_date: tx.value_date || '',
+      transaction_type: tx.transaction_type,
       amount: tx.amount.toString(),
       business_entity: tx.business_entity || '',
       category_id: tx.category_parent_id ? tx.category_parent_id.toString() : (tx.category_id?.toString() ?? ''),
@@ -186,6 +184,7 @@ function Transactions({ viewScope, setViewScope }) {
       recurring_id: tx.recurring_id?.toString() ?? '',
       savings_goal_id: tx.savings_goal_id?.toString() ?? '',
       insurance_id: tx.insurance_id?.toString() ?? '',
+      settles_credit_card_id: tx.settles_credit_card_id?.toString() ?? '',
     })
   }
 
@@ -208,19 +207,21 @@ function Transactions({ viewScope, setViewScope }) {
   function saveFullEdit(txId) {
     db.prepare(`
       UPDATE Transactions SET
-        transaction_date=?, value_date=?, amount=?, business_entity=?,
+        transaction_date=?, value_date=?, transaction_type=?, amount=?, business_entity=?,
         category_id=?, account_id=?, description=?, tags=?,
         is_budgetary=?, is_maaser_obligated=?,
-        liability_id=?, recurring_id=?, insurance_id=?
+        liability_id=?, recurring_id=?, insurance_id=?, settles_credit_card_id=?
       WHERE id=?
     `).run(
       editForm.transaction_date, editForm.value_date || null,
+      editForm.settles_credit_card_id ? 'Transfer' : editForm.transaction_type,
       parseFloat(editForm.amount), editForm.business_entity,
-      editForm.sub_category_id || editForm.category_id || null, editForm.account_id,
-      editForm.description || null, editForm.tags || null,
-      editForm.is_budgetary ? 1 : 0, editForm.is_maaser_obligated ? 1 : 0,
+      editForm.settles_credit_card_id ? null : (editForm.sub_category_id || editForm.category_id || null),
+      editForm.account_id, editForm.description || null, editForm.tags || null,
+      editForm.settles_credit_card_id ? 0 : (editForm.is_budgetary ? 1 : 0),
+      editForm.settles_credit_card_id ? 0 : (editForm.is_maaser_obligated ? 1 : 0),
       editForm.liability_id || null, editForm.recurring_id || null,
-      editForm.insurance_id || null,
+      editForm.insurance_id || null, editForm.settles_credit_card_id || null,
       txId
     )
     setEditingFull(null)
@@ -756,7 +757,13 @@ function Transactions({ viewScope, setViewScope }) {
                       )
                     ),
                     React.createElement('td', { style: styles.td }, tx.transaction_date),
-                    React.createElement('td', { style: { ...styles.td, fontWeight: '500' } }, tx.business_entity || '—'),
+                    React.createElement('td', { style: { ...styles.td, fontWeight: '500', maxWidth: 260 } },
+                      React.createElement('div', { style: { fontWeight: '500' } }, tx.business_entity || '—'),
+                      tx.description && React.createElement('div', {
+                        style: { fontSize: 11, fontWeight: '400', color: '#64748B', marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' },
+                        title: tx.description,
+                      }, tx.description),
+                    ),
                     React.createElement('td', { style: styles.td },
                       tx.category_parent_id
                         ? React.createElement('span', { style: styles.badge }, tx.parent_category_name || '—')
@@ -825,7 +832,7 @@ function Transactions({ viewScope, setViewScope }) {
                               EditField('קטגוריה', React.createElement('select', { style: editInput, value: editForm.category_id, onChange: e => setEdit('category_id', e.target.value) },
                                 React.createElement('option', { value: '' }, 'ללא קטגוריה'),
                                 db.prepare('SELECT * FROM Categories WHERE is_active=1 ORDER BY parent_id, sort_order').all()
-                                .filter(c => tx.transaction_type === 'Income' ? c.type === 'Income' : c.type === 'Expense')
+                                .filter(c => editForm.transaction_type === 'Income' ? c.type === 'Income' : c.type === 'Expense')
                                 .map(c => React.createElement('option', { key: c.id, value: c.id },
                                   `${c.parent_id ? '　└ ' : ''}${c.icon || ''} ${c.name}`
                                 ))
@@ -864,6 +871,16 @@ function Transactions({ viewScope, setViewScope }) {
                                 db.prepare("SELECT id, name, type, is_active FROM Recurring_Templates ORDER BY is_active DESC, type, name").all()
                                   .map(r => React.createElement('option', { key: r.id, value: r.id }, `${r.name}${r.type === 'installment' ? ' (תשלומים)' : ''}${!r.is_active ? ' [בארכיון]' : ''}`))
                               )),
+                              EditField('סילוק / תשלום כרטיס אשראי', React.createElement('select', {
+                                style: editInput,
+                                value: editForm.settles_credit_card_id,
+                                onChange: e => setEdit('settles_credit_card_id', e.target.value),
+                              },
+                                React.createElement('option', { value: '' }, '— לא תשלום כרטיס —'),
+                                accounts.filter(a => a.type === 'Credit_Card').map(a =>
+                                  React.createElement('option', { key: a.id, value: String(a.id) }, a.name)
+                                )
+                              )),
                               EditField('יעד חיסכון', React.createElement('select', { style: editInput, value: editForm.savings_goal_id, onChange: e => setEdit('savings_goal_id', e.target.value) },
                                 React.createElement('option', { value: '' }, '— ללא —'),
                                 db.prepare('SELECT id, name FROM Savings_Goals WHERE is_active=1').all()
@@ -876,14 +893,28 @@ function Transactions({ viewScope, setViewScope }) {
                               )),
                             ),
 
+                            editForm.settles_credit_card_id && React.createElement('p', {
+                              style: { fontSize: 11, color: '#7C3AED', marginBottom: 8 }
+                            }, 'בעת שמירה התנועה תסומן כהעברה שאינה תקציבית, כדי למנוע ספירה כפולה של הוצאות הכרטיס.'),
+
                             // checkboxes
                             React.createElement('div', { style: { display: 'flex', gap: 16, marginBottom: 12 } },
                               React.createElement('label', { style: { fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 } },
-                                React.createElement('input', { type: 'checkbox', checked: editForm.is_budgetary, onChange: e => setEdit('is_budgetary', e.target.checked) }),
+                                React.createElement('input', {
+                                  type: 'checkbox',
+                                  checked: editForm.settles_credit_card_id ? false : editForm.is_budgetary,
+                                  disabled: !!editForm.settles_credit_card_id,
+                                  onChange: e => setEdit('is_budgetary', e.target.checked)
+                                }),
                                 ' תקציבי'
                               ),
                               React.createElement('label', { style: { fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 } },
-                                React.createElement('input', { type: 'checkbox', checked: editForm.is_maaser_obligated, onChange: e => setEdit('is_maaser_obligated', e.target.checked) }),
+                                React.createElement('input', {
+                                  type: 'checkbox',
+                                  checked: editForm.settles_credit_card_id ? false : editForm.is_maaser_obligated,
+                                  disabled: !!editForm.settles_credit_card_id,
+                                  onChange: e => setEdit('is_maaser_obligated', e.target.checked)
+                                }),
                                 ' חייב במעשר'
                               ),
                             ),
@@ -907,6 +938,11 @@ function Transactions({ viewScope, setViewScope }) {
                               tx.value_date && InfoField('תאריך ערך', tx.value_date),
                               tx.created_at && InfoField('תאריך יצירה', tx.created_at.slice(0, 10)),
                               tx.description && InfoField('הערות', tx.description),
+                              tx.settles_credit_card_id && InfoField(
+                                'תשלום כרטיס אשראי',
+                                db.prepare('SELECT name FROM Accounts WHERE id=?').get(tx.settles_credit_card_id)?.name || '—',
+                                '#7C3AED'
+                              ),
                               tx.tags && InfoField('תגיות', tx.tags),
                               expandedData.loan && InfoField('הלוואה מקושרת', expandedData.loan.name, '#E11D48'),
                               expandedData.recurring && InfoField(
@@ -1089,25 +1125,17 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
 
   function detectCategory(businessEntity) {
     if (!businessEntity || businessEntity.length < 2) return
-    const stopWords = ['בעמ', 'בע"מ', 'חברה', 'עוסק', 'מורשה', 'בע', 'של', 'את', 'על', 'עם', 'ltd', 'inc']
-    const getWords = str => str.toLowerCase()
-      .replace(/[^א-תa-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !stopWords.includes(w))
-      .map(w => w.startsWith('ה') && w.length > 3 ? w.slice(1) : w)
-
-    const name = businessEntity.toLowerCase().trim()
-    const rules = db.prepare(`
+    const rules = filterEligibleRules(db.prepare(`
       SELECT * FROM Automation_Rules
       WHERE match_type NOT IN ('setting','mapping') AND category_id IS NOT NULL
-    `).all()
+    `).all(), {
+      accountId: form.account_id,
+      amount: form.amount === '' ? null : Number(form.amount),
+      date: form.transaction_date || null,
+    })
+    const best = findBestMerchantRule(businessEntity, rules)
+    if (!best) return
 
-    if (rules.length === 0) return
-
-   // התאמה מדויקת
-  const exactMatches = rules.filter(r => r.original_string.toLowerCase() === name)
-  if (exactMatches.length > 0) {
-    const best = exactMatches.sort((a, b) => b.use_count - a.use_count)[0]
     const cat = db.prepare('SELECT * FROM Categories WHERE id=?').get(best.category_id)
     if (cat?.parent_id) {
       set('category_id', cat.parent_id.toString())
@@ -1117,45 +1145,6 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
       setSubCategoryId('')
     }
     setAutoDetected(true)
-    return
-  }
-
-    // התאמה חלקית
-    const currentWords = getWords(name)
-    if (currentWords.length === 0) return
-
-    let scores = {}
-    let ruleMap = {}
-    for (const rule of rules) {
-      const ruleWords = getWords(rule.original_string)
-      const matches = currentWords.filter(cw =>
-        ruleWords.some(rw =>
-          rw.includes(cw) || cw.includes(rw) ||
-          (cw.length >= 4 && rw.length >= 4 && (rw.startsWith(cw.slice(0, 4)) || cw.startsWith(rw.slice(0, 4))))
-        )
-      )
-      if (matches.length > 0) {
-        const key = rule.category_id
-        scores[key] = (scores[key] || 0) + matches.length * (rule.use_count || 1)
-        if (!ruleMap[key] || matches.length * (rule.use_count || 1) > (ruleMap[key]._score || 0)) {
-          ruleMap[key] = { ...rule, _score: matches.length * (rule.use_count || 1) }
-        }
-      }
-    }
-
-    const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1])
-    if (sorted.length > 0) {
-      const catId = parseInt(sorted[0][0])
-      const cat = db.prepare('SELECT * FROM Categories WHERE id=?').get(catId)
-      if (cat?.parent_id) {
-        set('category_id', cat.parent_id.toString())
-        setSubCategoryId(cat.id.toString())
-      } else {
-        set('category_id', catId.toString())
-        setSubCategoryId('')
-      }
-      setAutoDetected(true)
-    }
   }
 
   function handleSave(addAnother = false) {

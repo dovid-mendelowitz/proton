@@ -2,6 +2,8 @@ const React = require('react')
 const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
+const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
+const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -21,25 +23,7 @@ function findHeaderRow(rows) {
   return 0
 }
 
-function parseDate(dateStr) {
-  if (!dateStr) return ''
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
-  const parts = dateStr.split('/')
-  if (parts.length === 3) {
-    let [a, b, c] = parts
-    if (c.length === 2) c = '20' + c
-    if (parseInt(a) <= 31 && parseInt(b) <= 12) {
-      return `${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`
-    }
-  }
-  const parts2 = dateStr.split('-')
-  if (parts2.length === 3 && parts2[0].length === 2) {
-    return `${parts2[2]}-${parts2[1]}-${parts2[0]}`
-  }
-  const d = new Date(dateStr)
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  return ''
-}
+
 
 function getDefaultDay() {
   try {
@@ -56,19 +40,52 @@ function getDefaultFallbackMonth() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-function loadSavedMapping(accountId) {
+const DEFAULT_MAPPING = {
+  date_col: '', value_date_col: '', business_col: '',
+  details_col: '', account_col: '',
+  amount_mode: 'single', amount_col: '',
+  debit_col: '', credit_col: '',
+  amount_type: 'minus_expense',
+}
+
+function getMappingKey(accountKey, headers) {
+  const signature = (headers || []).map(h => String(h ?? '').trim().toLowerCase()).join('\u001f')
+  let hash = 2166136261
+  for (let i = 0; i < signature.length; i++) {
+    hash ^= signature.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `mapping_${accountKey}_${(hash >>> 0).toString(36)}`
+}
+
+function loadSavedMapping(accountKey, headers) {
   try {
+    const key = getMappingKey(accountKey, headers)
     const saved = db.prepare(
       "SELECT cleaned_name FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
-    ).get(`mapping_${accountId}`)
+    ).get(key)
     if (saved) return JSON.parse(saved.cleaned_name)
+
+    // Migrate legacy per-account mapping only while no format-specific profiles exist.
+    const prefix = `mapping_${accountKey}_`
+    const hasProfiles = db.prepare(
+      "SELECT id FROM Automation_Rules WHERE match_type='mapping' AND substr(original_string,1,?)=? LIMIT 1"
+    ).get(prefix.length, prefix)
+    if (hasProfiles) return null
+
+    if (accountKey !== 'multi') {
+      const legacy = db.prepare(
+        "SELECT cleaned_name FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
+      ).get(`mapping_${accountKey}`)
+      if (legacy) return JSON.parse(legacy.cleaned_name)
+    }
   } catch {}
   return null
 }
 
-function saveMapping(accountId, mapping) {
+function saveMapping(accountKey, mapping, headers) {
   try {
-    const key = `mapping_${accountId}`
+    const key = getMappingKey(accountKey, headers)
     const val = JSON.stringify(mapping)
     const exists = db.prepare(
       "SELECT id FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
@@ -81,57 +98,16 @@ function saveMapping(accountId, mapping) {
   } catch {}
 }
 
-function findBestRule(businessEntity) {
+function findBestRule(businessEntity, context = {}) {
   if (!businessEntity) return null
-  const name = businessEntity.toLowerCase().trim()
   const rules = db.prepare(`
     SELECT r.*, c.name as category_name FROM Automation_Rules r
     LEFT JOIN Categories c ON r.category_id=c.id
     WHERE r.match_type NOT IN ('mapping','setting')
-    AND r.category_id IS NOT NULL
+      AND r.category_id IS NOT NULL
+      AND COALESCE(r.enabled, 1) = 1
   `).all()
-  if (rules.length === 0) return null
-
-  // שלב 1 — התאמה מדויקת
-  const exactMatches = rules.filter(r => r.original_string.toLowerCase() === name)
-  if (exactMatches.length === 1) return exactMatches[0]
-  if (exactMatches.length > 1) return exactMatches.sort((a, b) => b.use_count - a.use_count)[0]
-
-  // שלב 2 — התאמה חלקית לפי מילים
-  const stopWords = ['בעמ', 'בע"מ', 'חברה', 'עוסק', 'מורשה', 'בע', 'של', 'את', 'על', 'עם', 'ltd', 'inc']
-  const getWords = str => str.toLowerCase()
-    .replace(/[^א-תa-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.includes(w))
-
-  const currentWords = getWords(name)
-  if (currentWords.length === 0) return null
-
-  let scores = {}
-  let ruleMap = {}
-  for (const rule of rules) {
-    const ruleWords = getWords(rule.original_string)
-    const matches = currentWords.filter(cw => 
-      ruleWords.some(rw => 
-        rw.includes(cw) || 
-        cw.includes(rw) ||
-        (cw.length >= 4 && rw.length >= 4 && (rw.startsWith(cw.slice(0, 4)) || cw.startsWith(rw.slice(0, 4))))
-      )
-    )
-    if (matches.length > 0) {
-      const key = rule.category_id
-      // צבור ניקוד מכל החוקים לאותה קטגוריה
-      scores[key] = (scores[key] || 0) + matches.length * (rule.use_count || 1)
-      // שמור את החוק עם הניקוד הגבוה ביותר לייצוג
-      if (!ruleMap[key] || matches.length * (rule.use_count || 1) > (ruleMap[key]._score || 0)) {
-        ruleMap[key] = { ...rule, _score: matches.length * (rule.use_count || 1) }
-      }
-    }
-  }
-
-  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1])
-  if (sorted.length > 0) return ruleMap[parseInt(sorted[0][0])]
-  return null
+  return findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
 }
 
 function Import({ onNavigate }) {
@@ -145,13 +121,7 @@ function Import({ onNavigate }) {
   const [headers, setHeaders] = useState([])
   const [allRows, setAllRows] = useState([])
   const [fallbackMonth, setFallbackMonth] = useState(getDefaultFallbackMonth)
-  const [mapping, setMapping] = useState({
-    date_col: '', value_date_col: '', business_col: '',
-    details_col: '', account_col: '',
-    amount_mode: 'single', amount_col: '',
-    debit_col: '', credit_col: '',
-    amount_type: 'minus_expense',
-  })
+  const [mapping, setMapping] = useState(DEFAULT_MAPPING)
   const [reviewRows, setReviewRows] = useState([])
   const [fileName, setFileName] = useState('')
   const [step3Result, setStep3Result] = useState(null)
@@ -164,10 +134,11 @@ function Import({ onNavigate }) {
   }, [])
 
   useEffect(() => {
-    if (!selectedAccount) return
-    const saved = loadSavedMapping(selectedAccount)
-    if (saved) setMapping(m => ({ ...m, ...saved }))
-  }, [selectedAccount])
+    if (!headers.length) return
+    const accountKey = selectedAccount || 'multi'
+    const saved = loadSavedMapping(accountKey, headers)
+    setMapping({ ...DEFAULT_MAPPING, ...(saved || {}) })
+  }, [selectedAccount, headers])
 
   function loadImportHistory() {
       try {
@@ -239,7 +210,7 @@ function Import({ onNavigate }) {
   }
 
   function handleBuildReview() {
-    if (selectedAccount) saveMapping(selectedAccount, mapping)
+    saveMapping(selectedAccount || 'multi', mapping, headers)
 
     const defaultDay = getDefaultDay()
     const fallbackDate = `${fallbackMonth}-${String(defaultDay).padStart(2, '0')}`
@@ -307,7 +278,7 @@ function Import({ onNavigate }) {
       let categoryName = null
       let autoDetected = false
       if (rawBusiness) {
-        const rule = findBestRule(rawBusiness)
+        const rule = findBestRule(rawBusiness, { accountId, amount, date: parseDate(rawDateStr) || null })
         if (rule) {
           categoryId = rule.category_id
           categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null

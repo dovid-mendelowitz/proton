@@ -80,8 +80,13 @@ function Recurring() {
     if (tab === 'recurring') {
       const monthly = recurring.reduce((s, t) => {
         if (t.frequency === 'monthly') return s + t.amount
+        if (t.frequency === 'bimonthly') return s + t.amount / 2
         if (t.frequency === 'quarterly') return s + t.amount / 3
         if (t.frequency === 'annual') return s + t.amount / 12
+        if (t.frequency === 'seasonal') {
+          const months = String(t.season_months || '').split(',').map(v => Number(v.trim())).filter(m => Number.isInteger(m) && m >= 1 && m <= 12)
+          return s + t.amount * new Set(months).size / 12
+        }
         return s
       }, 0)
       const annual = monthly * 12
@@ -286,7 +291,7 @@ function Recurring() {
 
 function RecurringCard({ template: t, fmt, onEdit, onArchive, onDelete, onLink }) {
   const [showTxs, setShowTxs] = useState(false)
-  const freqLabel = { monthly: 'חודשי', quarterly: 'רבעוני', annual: 'שנתי' }[t.frequency] || 'חודשי'
+  const freqLabel = { monthly: 'חודשי', bimonthly: 'אחת לחודשיים', quarterly: 'רבעוני', annual: 'שנתי', seasonal: 'עונתי', one_off: 'חד-פעמי' }[t.frequency] || 'חודשי'
 
   const linkedTxs = showTxs ? db.prepare(`
     SELECT * FROM Transactions WHERE recurring_id=? ORDER BY transaction_date DESC LIMIT 12
@@ -568,6 +573,7 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
     name: editTemplate?.name ?? '',
     amount: editTemplate?.amount?.toString() ?? '',
     frequency: editTemplate?.frequency ?? 'monthly',
+    season_months: editTemplate?.season_months ?? '3,6,9,12',
     charge_day: editTemplate?.charge_day?.toString() ?? '1',
     first_charge_date: editTemplate?.first_charge_date ?? new Date().toISOString().slice(0, 10),
     account_id: editTemplate?.account_id?.toString() ?? accounts[0]?.id?.toString() ?? '',
@@ -596,6 +602,12 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
       setError('נא למלא סכום כולל ומספר תשלומים'); return
     }
     if (type === 'recurring' && !form.amount) { setError('נא למלא סכום'); return }
+    if (type === 'recurring' && form.frequency === 'seasonal') {
+      const months = form.season_months.split(',').map(v => Number(v.trim()))
+      if (!months.length || months.some(m => !Number.isInteger(m) || m < 1 || m > 12)) {
+        setError('יש להזין חודשי עונה בין 1 ל-12, מופרדים בפסיקים'); return
+      }
+    }
 
     const amount = type === 'installment'
       ? (installmentAmount || parseFloat(form.amount))
@@ -610,12 +622,12 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
     if (editTemplate) {
       db.prepare(`
         UPDATE Recurring_Templates SET
-          name=?, type=?, amount=?, frequency=?, charge_day=?, first_charge_date=?,
+          name=?, type=?, amount=?, frequency=?, season_months=?, charge_day=?, first_charge_date=?,
           account_id=?, category_id=?, is_estimated=?, is_budgetary=?, is_maaser_obligated=?,
           num_installments=?, total_amount=?, template_payload=?, notes=?
         WHERE id=?
       `).run(
-        form.name, type, amount, form.frequency, parseInt(form.charge_day) || 1, form.first_charge_date,
+        form.name, type, amount, form.frequency, type === 'recurring' && form.frequency === 'seasonal' ? form.season_months : null, parseInt(form.charge_day) || 1, form.first_charge_date,
         form.account_id || null, form.category_id || null,
         form.is_estimated ? 1 : 0, form.is_budgetary ? 1 : 0, form.is_maaser_obligated ? 1 : 0,
         type === 'installment' ? parseInt(form.num_installments) : null,
@@ -625,12 +637,12 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
     } else {
       db.prepare(`
         INSERT INTO Recurring_Templates
-          (name, type, amount, frequency, charge_day, first_charge_date,
+          (name, type, amount, frequency, season_months, charge_day, first_charge_date,
            account_id, category_id, is_estimated, is_budgetary, is_maaser_obligated,
            num_installments, total_amount, template_payload, notes, is_active, installments_paid)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
       `).run(
-        form.name, type, amount, form.frequency, parseInt(form.charge_day) || 1, form.first_charge_date,
+        form.name, type, amount, form.frequency, type === 'recurring' && form.frequency === 'seasonal' ? form.season_months : null, parseInt(form.charge_day) || 1, form.first_charge_date,
         form.account_id || null, form.category_id || null,
         form.is_estimated ? 1 : 0, form.is_budgetary ? 1 : 0, form.is_maaser_obligated ? 1 : 0,
         type === 'installment' ? parseInt(form.num_installments) : null,
@@ -678,11 +690,18 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
             Field('סכום (₪)', React.createElement('input', { style: styles.input, type: 'number', value: form.amount, onChange: e => set('amount', e.target.value) })),
             Field('תדירות', React.createElement('select', { style: styles.input, value: form.frequency, onChange: e => set('frequency', e.target.value) },
               React.createElement('option', { value: 'monthly' }, 'חודשי'),
+              React.createElement('option', { value: 'bimonthly' }, 'אחת לחודשיים'),
               React.createElement('option', { value: 'quarterly' }, 'רבעוני'),
               React.createElement('option', { value: 'annual' }, 'שנתי'),
+              React.createElement('option', { value: 'seasonal' }, 'עונתי'),
+              React.createElement('option', { value: 'one_off' }, 'חד-פעמי'),
             )),
             Field('יום בחודש', React.createElement('input', { style: styles.input, type: 'number', min: 1, max: 28, value: form.charge_day, onChange: e => set('charge_day', e.target.value) })),
           ),
+          form.frequency === 'seasonal' && Field('חודשי עונה (1–12, מופרדים בפסיקים)', React.createElement('input', {
+            style: styles.input, value: form.season_months, onChange: e => set('season_months', e.target.value),
+            placeholder: 'למשל: 3,6,9,12'
+          })),
           React.createElement('label', { style: styles.checkLabel },
             React.createElement('input', { type: 'checkbox', checked: !!form.is_estimated, onChange: e => set('is_estimated', e.target.checked) }),
             ' סכום משתנה / משוער (~)'
