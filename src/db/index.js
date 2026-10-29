@@ -212,6 +212,7 @@ db.exec(`
     type                TEXT    NOT NULL DEFAULT 'recurring',
     amount              REAL    NOT NULL DEFAULT 0,
     frequency           TEXT    NOT NULL DEFAULT 'monthly',
+    season_months       TEXT,
     charge_day          INTEGER NOT NULL DEFAULT 1,
     first_charge_date   TEXT,
     account_id          INTEGER REFERENCES Accounts(id),
