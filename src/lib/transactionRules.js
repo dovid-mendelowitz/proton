@@ -71,6 +71,12 @@ function scoreMerchantRule(merchant, rule) {
   return merchantCoverage * 0.7 + ruleCoverage * 0.3
 }
 
+function findScopedMerchantRule(merchant, rules, context = {}) {
+  const rule = findBestMerchantRule(merchant, filterEligibleRules(rules, context))
+  if (rule) return { rule, outOfScope: false }
+  return { rule: null, outOfScope: Boolean(findBestMerchantRule(merchant, rules)) }
+}
+
 function findBestMerchantRule(merchant, rules) {
   if (!normalizeMerchantName(merchant)) return null
   const candidates = (rules || [])
@@ -96,4 +102,5 @@ module.exports = {
   normalizeMerchantName,
   scoreMerchantRule,
   findBestMerchantRule,
+  findScopedMerchantRule,
 }
