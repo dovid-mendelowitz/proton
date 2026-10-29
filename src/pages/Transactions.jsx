@@ -832,7 +832,7 @@ function Transactions({ viewScope, setViewScope }) {
                               EditField('קטגוריה', React.createElement('select', { style: editInput, value: editForm.category_id, onChange: e => setEdit('category_id', e.target.value) },
                                 React.createElement('option', { value: '' }, 'ללא קטגוריה'),
                                 db.prepare('SELECT * FROM Categories WHERE is_active=1 ORDER BY parent_id, sort_order').all()
-                                .filter(c => tx.transaction_type === 'Income' ? c.type === 'Income' : c.type === 'Expense')
+                                .filter(c => editForm.transaction_type === 'Income' ? c.type === 'Income' : c.type === 'Expense')
                                 .map(c => React.createElement('option', { key: c.id, value: c.id },
                                   `${c.parent_id ? '　└ ' : ''}${c.icon || ''} ${c.name}`
                                 ))
