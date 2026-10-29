@@ -642,7 +642,7 @@ function TemplateModal({ type, editTemplate, onClose, onSave }) {
            num_installments, total_amount, template_payload, notes, is_active, installments_paid)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
       `).run(
-        form.name, type, amount, form.frequency, parseInt(form.charge_day) || 1, form.first_charge_date,
+        form.name, type, amount, form.frequency, type === 'recurring' && form.frequency === 'seasonal' ? form.season_months : null, parseInt(form.charge_day) || 1, form.first_charge_date,
         form.account_id || null, form.category_id || null,
         form.is_estimated ? 1 : 0, form.is_budgetary ? 1 : 0, form.is_maaser_obligated ? 1 : 0,
         type === 'installment' ? parseInt(form.num_installments) : null,
