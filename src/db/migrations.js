@@ -1,0 +1,52 @@
+// Idempotent SQLite schema repair for both new and existing user databases.
+// Keep this after the CREATE TABLE statements in src/db/index.js.
+function ensureColumn(db, table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info("${table}")`).all()
+    .some(item => item.name === column)
+  if (!exists) db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`)
+}
+
+function runMigrations(db) {
+  const migrations = [
+    ['Transactions', 'value_date', 'TEXT'],
+    ['Transactions', 'import_id', 'TEXT'],
+    ['Transactions', 'settles_credit_card_id', 'INTEGER REFERENCES Accounts(id)'],
+    ['Transactions', 'parent_id', 'INTEGER REFERENCES Transactions(id)'],
+    ['Transactions', 'offset_group_id', 'INTEGER'],
+    ['Transactions', 'insurance_id', 'INTEGER REFERENCES Insurance_Policies(id)'],
+    ['Transactions', 'liability_id', 'INTEGER REFERENCES Liabilities(id)'],
+    ['Transactions', 'recurring_id', 'INTEGER REFERENCES Recurring_Templates(id)'],
+    ['Transactions', 'savings_goal_id', 'INTEGER REFERENCES Savings_Goals(id)'],
+    ['Accounts', 'billing_day', 'INTEGER'],
+    ['Accounts', 'settlement_account_id', 'INTEGER REFERENCES Accounts(id)'],
+    ['Accounts', 'current_balance', 'REAL'],
+    ['Accounts', 'balance_updated_at', 'TEXT'],
+    ['Assets', 'exchange', 'TEXT'],
+    ['Assets', 'last_api_price', 'REAL'],
+    ['Assets', 'price_currency', "TEXT DEFAULT 'ILS'"],
+    ['Assets', 'price_override', 'REAL'],
+    ['Assets', 'price_updated_at', 'TEXT'],
+    ['Assets', 'purchase_price', 'REAL'],
+    ['Assets', 'purchase_date', 'TEXT'],
+  ]
+
+  const apply = db.transaction(() => {
+    for (const [table, column, definition] of migrations) {
+      ensureColumn(db, table, column, definition)
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS Schema_Migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `)
+    db.prepare(`
+      INSERT OR IGNORE INTO Schema_Migrations (name) VALUES (?)
+    `).run('repair_missing_columns_v1')
+  })
+
+  apply()
+}
+
+module.exports = { runMigrations }
