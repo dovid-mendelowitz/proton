@@ -3,6 +3,7 @@ const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
 const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
+const { filterEligibleRules } = require('../lib/transactionRules.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -109,14 +110,7 @@ function findBestRule(businessEntity, context = {}) {
   `).all()
   if (rules.length === 0) return null
 
-  const eligibleRules = rules.filter(rule => {
-    if (rule.account_id != null && (!context.accountId || Number(rule.account_id) !== Number(context.accountId))) return false
-    if (rule.min_amount != null && (context.amount == null || context.amount < rule.min_amount)) return false
-    if (rule.max_amount != null && (context.amount == null || context.amount > rule.max_amount)) return false
-    if (rule.valid_from && (!context.date || context.date < rule.valid_from)) return false
-    if (rule.valid_to && (!context.date || context.date > rule.valid_to)) return false
-    return true
-  })
+  const eligibleRules = filterEligibleRules(rules, context)
   if (eligibleRules.length === 0) return null
 
   // שלב 1 — התאמה מדויקת
