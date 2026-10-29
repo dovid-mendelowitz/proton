@@ -322,7 +322,7 @@ function Settings() {
           ? React.createElement('p', { style: { color: '#94A3B8', fontSize: 13 } }, 'אין חוקים עדיין')
           : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
               rules.map(rule =>
-                React.createElement('div', { key: rule.id, style: styles.ruleRow },
+                React.createElement('div', { key: rule.id, style: { ...styles.ruleRow, opacity: rule.enabled === 0 ? 0.55 : 1 } },
                   React.createElement('div', { style: { flex: 1, minWidth: 0 } },
                     React.createElement('p', { style: { fontSize: 13, fontWeight: '500', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, rule.original_string),
                     React.createElement('p', { style: { fontSize: 11, color: '#64748B' } }, (() => {
@@ -332,7 +332,18 @@ function Settings() {
                       const catDisplay = cat?.parent_id
                         ? `${cat.parent_name} ← ${cat.name}`
                         : (cat?.name || 'ללא קטגוריה')
-                      return `→ ${rule.category_icon || ''} ${catDisplay} | שימושים: ${rule.use_count}`
+                      const accountName = rule.account_id
+                        ? db.prepare('SELECT name FROM Accounts WHERE id=?').get(rule.account_id)?.name
+                        : null
+                      const conditions = [
+                        accountName,
+                        rule.min_amount != null ? `מ-₪${rule.min_amount}` : null,
+                        rule.max_amount != null ? `עד ₪${rule.max_amount}` : null,
+                        rule.valid_from ? `מ-${rule.valid_from}` : null,
+                        rule.valid_to ? `עד-${rule.valid_to}` : null,
+                        rule.enabled === 0 ? 'מושבת' : null,
+                      ].filter(Boolean).join(' · ')
+                      return `→ ${rule.category_icon || ''} ${catDisplay} | שימושים: ${rule.use_count}${conditions ? ' | ' + conditions : ''}`
                     })()),
                   ),
                   React.createElement('div', { style: { display: 'flex', gap: 6 } },
