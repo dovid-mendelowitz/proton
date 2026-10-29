@@ -20,6 +20,7 @@ test('parses valid Date objects and Excel serial dates', () => {
 
 test('rejects impossible or ambiguous dates instead of silently substituting today', () => {
   assert.equal(parseImportDate('31.02.2026'), '')
+  assert.equal(parseImportDate('26'), '')
   assert.equal(parseImportDate('not a date'), '')
   assert.equal(parseImportDate(''), '')
   assert.equal(parseImportDate(null), '')
