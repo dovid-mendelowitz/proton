@@ -187,6 +187,7 @@ function Transactions({ viewScope, setViewScope }) {
       recurring_id: tx.recurring_id?.toString() ?? '',
       savings_goal_id: tx.savings_goal_id?.toString() ?? '',
       insurance_id: tx.insurance_id?.toString() ?? '',
+      settles_credit_card_id: tx.settles_credit_card_id?.toString() ?? '',
     })
   }
 
@@ -209,19 +210,21 @@ function Transactions({ viewScope, setViewScope }) {
   function saveFullEdit(txId) {
     db.prepare(`
       UPDATE Transactions SET
-        transaction_date=?, value_date=?, amount=?, business_entity=?,
+        transaction_date=?, value_date=?, transaction_type=?, amount=?, business_entity=?,
         category_id=?, account_id=?, description=?, tags=?,
         is_budgetary=?, is_maaser_obligated=?,
-        liability_id=?, recurring_id=?, insurance_id=?
+        liability_id=?, recurring_id=?, insurance_id=?, settles_credit_card_id=?
       WHERE id=?
     `).run(
       editForm.transaction_date, editForm.value_date || null,
+      editForm.settles_credit_card_id ? 'Transfer' : editForm.transaction_type,
       parseFloat(editForm.amount), editForm.business_entity,
-      editForm.sub_category_id || editForm.category_id || null, editForm.account_id,
-      editForm.description || null, editForm.tags || null,
-      editForm.is_budgetary ? 1 : 0, editForm.is_maaser_obligated ? 1 : 0,
+      editForm.settles_credit_card_id ? null : (editForm.sub_category_id || editForm.category_id || null),
+      editForm.account_id, editForm.description || null, editForm.tags || null,
+      editForm.settles_credit_card_id ? 0 : (editForm.is_budgetary ? 1 : 0),
+      editForm.settles_credit_card_id ? 0 : (editForm.is_maaser_obligated ? 1 : 0),
       editForm.liability_id || null, editForm.recurring_id || null,
-      editForm.insurance_id || null,
+      editForm.insurance_id || null, editForm.settles_credit_card_id || null,
       txId
     )
     setEditingFull(null)
@@ -870,6 +873,16 @@ function Transactions({ viewScope, setViewScope }) {
                                 React.createElement('option', { value: '' }, '— ללא —'),
                                 db.prepare("SELECT id, name, type, is_active FROM Recurring_Templates ORDER BY is_active DESC, type, name").all()
                                   .map(r => React.createElement('option', { key: r.id, value: r.id }, `${r.name}${r.type === 'installment' ? ' (תשלומים)' : ''}${!r.is_active ? ' [בארכיון]' : ''}`))
+                              )),
+                              EditField('סילוק / תשלום כרטיס אשראי', React.createElement('select', {
+                                style: editInput,
+                                value: editForm.settles_credit_card_id,
+                                onChange: e => setEdit('settles_credit_card_id', e.target.value),
+                              },
+                                React.createElement('option', { value: '' }, '— לא תשלום כרטיס —'),
+                                accounts.filter(a => a.type === 'Credit_Card').map(a =>
+                                  React.createElement('option', { key: a.id, value: String(a.id) }, a.name)
+                                )
                               )),
                               EditField('יעד חיסכון', React.createElement('select', { style: editInput, value: editForm.savings_goal_id, onChange: e => setEdit('savings_goal_id', e.target.value) },
                                 React.createElement('option', { value: '' }, '— ללא —'),
