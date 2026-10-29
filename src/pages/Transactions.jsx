@@ -5,7 +5,7 @@ const { getDateColumn } = require('../db/index.js')
 const { getScopeRange } = require('../lib/viewScope.js')
 const { addMonthsClamped, parseLocalDate } = require('../lib/dateUtils.js')
 const { generateAmortization } = require('../lib/loanAmortization.js')
-const { filterEligibleRules } = require('../lib/transactionRules.js')
+const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
 
 function generateVirtualTransactions() {
   const virtual = []
@@ -1129,14 +1129,6 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
 
   function detectCategory(businessEntity) {
     if (!businessEntity || businessEntity.length < 2) return
-    const stopWords = ['בעמ', 'בע"מ', 'חברה', 'עוסק', 'מורשה', 'בע', 'של', 'את', 'על', 'עם', 'ltd', 'inc']
-    const getWords = str => str.toLowerCase()
-      .replace(/[^א-תa-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !stopWords.includes(w))
-      .map(w => w.startsWith('ה') && w.length > 3 ? w.slice(1) : w)
-
-    const name = businessEntity.toLowerCase().trim()
     const rules = filterEligibleRules(db.prepare(`
       SELECT * FROM Automation_Rules
       WHERE match_type NOT IN ('setting','mapping') AND category_id IS NOT NULL
@@ -1145,13 +1137,9 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
       amount: form.amount === '' ? null : Number(form.amount),
       date: form.transaction_date || null,
     })
+    const best = findBestMerchantRule(businessEntity, rules)
+    if (!best) return
 
-    if (rules.length === 0) return
-
-   // התאמה מדויקת
-  const exactMatches = rules.filter(r => r.original_string.toLowerCase() === name)
-  if (exactMatches.length > 0) {
-    const best = exactMatches.sort((a, b) => b.use_count - a.use_count)[0]
     const cat = db.prepare('SELECT * FROM Categories WHERE id=?').get(best.category_id)
     if (cat?.parent_id) {
       set('category_id', cat.parent_id.toString())
@@ -1161,45 +1149,6 @@ function AddTransactionModal({ categories, accounts, onClose, onSave, selectedMo
       setSubCategoryId('')
     }
     setAutoDetected(true)
-    return
-  }
-
-    // התאמה חלקית
-    const currentWords = getWords(name)
-    if (currentWords.length === 0) return
-
-    let scores = {}
-    let ruleMap = {}
-    for (const rule of rules) {
-      const ruleWords = getWords(rule.original_string)
-      const matches = currentWords.filter(cw =>
-        ruleWords.some(rw =>
-          rw.includes(cw) || cw.includes(rw) ||
-          (cw.length >= 4 && rw.length >= 4 && (rw.startsWith(cw.slice(0, 4)) || cw.startsWith(rw.slice(0, 4))))
-        )
-      )
-      if (matches.length > 0) {
-        const key = rule.category_id
-        scores[key] = (scores[key] || 0) + matches.length * (rule.use_count || 1)
-        if (!ruleMap[key] || matches.length * (rule.use_count || 1) > (ruleMap[key]._score || 0)) {
-          ruleMap[key] = { ...rule, _score: matches.length * (rule.use_count || 1) }
-        }
-      }
-    }
-
-    const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1])
-    if (sorted.length > 0) {
-      const catId = parseInt(sorted[0][0])
-      const cat = db.prepare('SELECT * FROM Categories WHERE id=?').get(catId)
-      if (cat?.parent_id) {
-        set('category_id', cat.parent_id.toString())
-        setSubCategoryId(cat.id.toString())
-      } else {
-        set('category_id', catId.toString())
-        setSubCategoryId('')
-      }
-      setAutoDetected(true)
-    }
   }
 
   function handleSave(addAnother = false) {
