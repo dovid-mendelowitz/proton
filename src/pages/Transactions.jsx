@@ -5,6 +5,7 @@ const { getDateColumn } = require('../db/index.js')
 const { getScopeRange } = require('../lib/viewScope.js')
 const { addMonthsClamped, parseLocalDate } = require('../lib/dateUtils.js')
 const { generateAmortization } = require('../lib/loanAmortization.js')
+const { generateRecurringDates } = require('../lib/recurringSchedule.js')
 const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
 
 function generateVirtualTransactions() {
@@ -48,15 +49,10 @@ function generateVirtualTransactions() {
     const today = new Date()
 
     for (const t of templates) {
-      // עוגן: יום החיוב כפי שחל בחודש הנוכחי (עם clamp אם החודש הנוכחי קצר מדי)
-      const chargeDay = t.charge_day || 1
-      const anchor = new Date(today.getFullYear(), today.getMonth(), 1)
-      anchor.setDate(Math.min(chargeDay, new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate()))
+      const schedule = generateRecurringDates(t, today, 12)
 
-      // צור תנועות ל-12 חודשים קדימה
-      for (let i = 0; i < 12; i++) {
-        const date = addMonthsClamped(anchor, i)
-        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      for (let i = 0; i < schedule.length; i++) {
+        const dateStr = schedule[i]
         const monthStr = dateStr.slice(0, 7)
 
         // בדוק אם כבר יש תנועה אמיתית מהתבנית לחודש הזה
