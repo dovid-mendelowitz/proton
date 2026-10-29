@@ -24,9 +24,13 @@ test('repairs missing columns in a fresh/minimal schema', () => {
     const txColumns = db.prepare('PRAGMA table_info(Transactions)').all().map(c => c.name)
     const accountColumns = db.prepare('PRAGMA table_info(Accounts)').all().map(c => c.name)
     const assetColumns = db.prepare('PRAGMA table_info(Assets)').all().map(c => c.name)
+    const ruleColumns = db.prepare('PRAGMA table_info(Automation_Rules)').all().map(c => c.name)
 
     for (const column of ['value_date', 'import_id', 'settles_credit_card_id', 'parent_id', 'offset_group_id', 'insurance_id', 'liability_id', 'recurring_id', 'savings_goal_id']) {
       assert.ok(txColumns.includes(column), `Transactions.${column} should exist`)
+    }
+    for (const column of ['account_id', 'min_amount', 'max_amount', 'valid_from', 'valid_to', 'enabled']) {
+      assert.ok(ruleColumns.includes(column), `Automation_Rules.${column} should exist`)
     }
     for (const column of ['billing_day', 'settlement_account_id', 'current_balance', 'balance_updated_at']) {
       assert.ok(accountColumns.includes(column), `Accounts.${column} should exist`)
