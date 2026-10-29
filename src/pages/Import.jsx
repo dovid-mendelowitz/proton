@@ -98,8 +98,8 @@ function saveMapping(accountKey, mapping, headers) {
   } catch {}
 }
 
-function findBestRule(businessEntity, context = {}, ignoreConstraints = false) {
-  if (!businessEntity) return null
+function findBestRule(businessEntity, context = {}) {
+  if (!businessEntity) return { rule: null, outOfScope: false }
   const rules = db.prepare(`
     SELECT r.*, c.name as category_name FROM Automation_Rules r
     LEFT JOIN Categories c ON r.category_id=c.id
@@ -107,10 +107,12 @@ function findBestRule(businessEntity, context = {}, ignoreConstraints = false) {
       AND r.category_id IS NOT NULL
       AND COALESCE(r.enabled, 1) = 1
   `).all()
-  return findBestMerchantRule(
-    businessEntity,
-    ignoreConstraints ? rules : filterEligibleRules(rules, context)
-  )
+  const rule = findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
+  if (rule) return { rule, outOfScope: false }
+  return {
+    rule: null,
+    outOfScope: Boolean(findBestMerchantRule(businessEntity, rules)),
+  }
 }
 
 function Import({ onNavigate }) {
@@ -283,12 +285,11 @@ function Import({ onNavigate }) {
       let ruleOutOfScope = false
       if (rawBusiness) {
         const context = { accountId, amount, date: parseDate(rawDateStr) || null }
-        const rule = findBestRule(rawBusiness, context)
-        const nameOnlyRule = rule || findBestRule(rawBusiness, {}, true)
-        ruleOutOfScope = !rule && Boolean(nameOnlyRule)
-        if (rule) {
-          categoryId = rule.category_id
-          categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null
+        const match = findBestRule(rawBusiness, context)
+        ruleOutOfScope = match.outOfScope
+        if (match.rule) {
+          categoryId = match.rule.category_id
+          categoryName = match.rule.category_name ?? categories.find(c => c.id === match.rule.category_id)?.name ?? null
           autoDetected = true
         }
       }
