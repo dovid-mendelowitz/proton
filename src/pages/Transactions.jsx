@@ -927,6 +927,11 @@ function Transactions({ viewScope, setViewScope }) {
                               tx.value_date && InfoField('תאריך ערך', tx.value_date),
                               tx.created_at && InfoField('תאריך יצירה', tx.created_at.slice(0, 10)),
                               tx.description && InfoField('הערות', tx.description),
+                              tx.settles_credit_card_id && InfoField(
+                                'תשלום כרטיס אשראי',
+                                db.prepare('SELECT name FROM Accounts WHERE id=?').get(tx.settles_credit_card_id)?.name || '—',
+                                '#7C3AED'
+                              ),
                               tx.tags && InfoField('תגיות', tx.tags),
                               expandedData.loan && InfoField('הלוואה מקושרת', expandedData.loan.name, '#E11D48'),
                               expandedData.recurring && InfoField(
