@@ -897,14 +897,28 @@ function Transactions({ viewScope, setViewScope }) {
                               )),
                             ),
 
+                            editForm.settles_credit_card_id && React.createElement('p', {
+                              style: { fontSize: 11, color: '#7C3AED', marginBottom: 8 }
+                            }, 'בעת שמירה התנועה תסומן כהעברה שאינה תקציבית, כדי למנוע ספירה כפולה של הוצאות הכרטיס.'),
+
                             // checkboxes
                             React.createElement('div', { style: { display: 'flex', gap: 16, marginBottom: 12 } },
                               React.createElement('label', { style: { fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 } },
-                                React.createElement('input', { type: 'checkbox', checked: editForm.is_budgetary, onChange: e => setEdit('is_budgetary', e.target.checked) }),
+                                React.createElement('input', {
+                                  type: 'checkbox',
+                                  checked: editForm.settles_credit_card_id ? false : editForm.is_budgetary,
+                                  disabled: !!editForm.settles_credit_card_id,
+                                  onChange: e => setEdit('is_budgetary', e.target.checked)
+                                }),
                                 ' תקציבי'
                               ),
                               React.createElement('label', { style: { fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 } },
-                                React.createElement('input', { type: 'checkbox', checked: editForm.is_maaser_obligated, onChange: e => setEdit('is_maaser_obligated', e.target.checked) }),
+                                React.createElement('input', {
+                                  type: 'checkbox',
+                                  checked: editForm.settles_credit_card_id ? false : editForm.is_maaser_obligated,
+                                  disabled: !!editForm.settles_credit_card_id,
+                                  onChange: e => setEdit('is_maaser_obligated', e.target.checked)
+                                }),
                                 ' חייב במעשר'
                               ),
                             ),
