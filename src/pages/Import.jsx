@@ -39,19 +39,52 @@ function getDefaultFallbackMonth() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-function loadSavedMapping(accountId) {
+const DEFAULT_MAPPING = {
+  date_col: '', value_date_col: '', business_col: '',
+  details_col: '', account_col: '',
+  amount_mode: 'single', amount_col: '',
+  debit_col: '', credit_col: '',
+  amount_type: 'minus_expense',
+}
+
+function getMappingKey(accountKey, headers) {
+  const signature = (headers || []).map(h => String(h ?? '').trim().toLowerCase()).join('\u001f')
+  let hash = 2166136261
+  for (let i = 0; i < signature.length; i++) {
+    hash ^= signature.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `mapping_${accountKey}_${(hash >>> 0).toString(36)}`
+}
+
+function loadSavedMapping(accountKey, headers) {
   try {
+    const key = getMappingKey(accountKey, headers)
     const saved = db.prepare(
       "SELECT cleaned_name FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
-    ).get(`mapping_${accountId}`)
+    ).get(key)
     if (saved) return JSON.parse(saved.cleaned_name)
+
+    // Migrate legacy per-account mapping only while no format-specific profiles exist.
+    const prefix = `mapping_${accountKey}_`
+    const hasProfiles = db.prepare(
+      "SELECT id FROM Automation_Rules WHERE match_type='mapping' AND substr(original_string,1,?)=? LIMIT 1"
+    ).get(prefix.length, prefix)
+    if (hasProfiles) return null
+
+    if (accountKey !== 'multi') {
+      const legacy = db.prepare(
+        "SELECT cleaned_name FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
+      ).get(`mapping_${accountKey}`)
+      if (legacy) return JSON.parse(legacy.cleaned_name)
+    }
   } catch {}
   return null
 }
 
-function saveMapping(accountId, mapping) {
+function saveMapping(accountKey, mapping, headers) {
   try {
-    const key = `mapping_${accountId}`
+    const key = getMappingKey(accountKey, headers)
     const val = JSON.stringify(mapping)
     const exists = db.prepare(
       "SELECT id FROM Automation_Rules WHERE original_string=? AND match_type='mapping'"
@@ -128,13 +161,7 @@ function Import({ onNavigate }) {
   const [headers, setHeaders] = useState([])
   const [allRows, setAllRows] = useState([])
   const [fallbackMonth, setFallbackMonth] = useState(getDefaultFallbackMonth)
-  const [mapping, setMapping] = useState({
-    date_col: '', value_date_col: '', business_col: '',
-    details_col: '', account_col: '',
-    amount_mode: 'single', amount_col: '',
-    debit_col: '', credit_col: '',
-    amount_type: 'minus_expense',
-  })
+  const [mapping, setMapping] = useState(DEFAULT_MAPPING)
   const [reviewRows, setReviewRows] = useState([])
   const [fileName, setFileName] = useState('')
   const [step3Result, setStep3Result] = useState(null)
@@ -147,10 +174,11 @@ function Import({ onNavigate }) {
   }, [])
 
   useEffect(() => {
-    if (!selectedAccount) return
-    const saved = loadSavedMapping(selectedAccount)
-    if (saved) setMapping(m => ({ ...m, ...saved }))
-  }, [selectedAccount])
+    if (!headers.length) return
+    const accountKey = selectedAccount || 'multi'
+    const saved = loadSavedMapping(accountKey, headers)
+    setMapping({ ...DEFAULT_MAPPING, ...(saved || {}) })
+  }, [selectedAccount, headers])
 
   function loadImportHistory() {
       try {
@@ -222,7 +250,7 @@ function Import({ onNavigate }) {
   }
 
   function handleBuildReview() {
-    if (selectedAccount) saveMapping(selectedAccount, mapping)
+    saveMapping(selectedAccount || 'multi', mapping, headers)
 
     const defaultDay = getDefaultDay()
     const fallbackDate = `${fallbackMonth}-${String(defaultDay).padStart(2, '0')}`
