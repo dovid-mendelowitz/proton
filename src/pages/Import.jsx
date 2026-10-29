@@ -3,7 +3,7 @@ const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
 const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
-const { filterEligibleRules, findBestMerchantRule } = require('../lib/transactionRules.js')
+const { findScopedMerchantRule } = require('../lib/transactionRules.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -99,7 +99,7 @@ function saveMapping(accountKey, mapping, headers) {
 }
 
 function findBestRule(businessEntity, context = {}) {
-  if (!businessEntity) return null
+  if (!businessEntity) return { rule: null, outOfScope: false }
   const rules = db.prepare(`
     SELECT r.*, c.name as category_name FROM Automation_Rules r
     LEFT JOIN Categories c ON r.category_id=c.id
@@ -107,7 +107,7 @@ function findBestRule(businessEntity, context = {}) {
       AND r.category_id IS NOT NULL
       AND COALESCE(r.enabled, 1) = 1
   `).all()
-  return findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
+  return findScopedMerchantRule(businessEntity, rules, context)
 }
 
 function Import({ onNavigate }) {
@@ -277,11 +277,14 @@ function Import({ onNavigate }) {
       let categoryId = null
       let categoryName = null
       let autoDetected = false
+      let ruleOutOfScope = false
       if (rawBusiness) {
-        const rule = findBestRule(rawBusiness, { accountId, amount, date: parseDate(rawDateStr) || null })
-        if (rule) {
-          categoryId = rule.category_id
-          categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null
+        const context = { accountId, amount, date: parseDate(rawDateStr) || null }
+        const match = findBestRule(rawBusiness, context)
+        ruleOutOfScope = match.outOfScope
+        if (match.rule) {
+          categoryId = match.rule.category_id
+          categoryName = match.rule.category_name ?? categories.find(c => c.id === match.rule.category_id)?.name ?? null
           autoDetected = true
         }
       }
@@ -289,7 +292,7 @@ function Import({ onNavigate }) {
       return {
         rawDate, rawBusiness, valueDate, details,
         amount, txType, accountId, accountName,
-        isDuplicate, categoryId, categoryName, autoDetected,
+        isDuplicate, categoryId, categoryName, autoDetected, ruleOutOfScope,
         usedFallbackDate: !parseDate(rawDateStr),
       }
     }).filter(r => r.amount > 0)
@@ -729,7 +732,14 @@ function Import({ onNavigate }) {
                 React.createElement('td', { style: styles.td },
                   row.isDuplicate
                     ? React.createElement('span', { style: { color: '#F59E0B', fontSize: 12 } }, '⚠ כפולה')
-                    : React.createElement('span', { style: { color: '#10B981', fontSize: 12 } }, '✓ חדשה')
+                    : row.ruleOutOfScope
+                      ? React.createElement('span', {
+                          style: { color: '#B45309', fontSize: 11, whiteSpace: 'nowrap' },
+                          title: 'נמצא כלל לבית העסק, אך תנאי החשבון, הסכום או התאריך אינם מתקיימים',
+                        }, '⚠ חריגה מכלל')
+                      : row.autoDetected
+                        ? React.createElement('span', { style: { color: '#2563EB', fontSize: 12 } }, '🤖 סווגה')
+                        : React.createElement('span', { style: { color: '#10B981', fontSize: 12 } }, '✓ חדשה')
                 ),
               )
             )
