@@ -756,7 +756,13 @@ function Transactions({ viewScope, setViewScope }) {
                       )
                     ),
                     React.createElement('td', { style: styles.td }, tx.transaction_date),
-                    React.createElement('td', { style: { ...styles.td, fontWeight: '500' } }, tx.business_entity || '—'),
+                    React.createElement('td', { style: { ...styles.td, fontWeight: '500', maxWidth: 260 } },
+                      React.createElement('div', { style: { fontWeight: '500' } }, tx.business_entity || '—'),
+                      tx.description && React.createElement('div', {
+                        style: { fontSize: 11, fontWeight: '400', color: '#64748B', marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' },
+                        title: tx.description,
+                      }, tx.description),
+                    ),
                     React.createElement('td', { style: styles.td },
                       tx.category_parent_id
                         ? React.createElement('span', { style: styles.badge }, tx.parent_category_name || '—')
