@@ -2,6 +2,7 @@ const React = require('react')
 const { useState, useEffect } = React
 const db = require('../db/index.js')
 const XLSX = require('xlsx')
+const { parseImportDate: parseDate } = require('../lib/importDateUtils.js')
 
 const HEADER_KEYWORDS = [
   'תאריך', 'סכום', 'תיאור', 'זכות', 'חובה', 'פעולה',
@@ -21,25 +22,7 @@ function findHeaderRow(rows) {
   return 0
 }
 
-function parseDate(dateStr) {
-  if (!dateStr) return ''
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
-  const parts = dateStr.split('/')
-  if (parts.length === 3) {
-    let [a, b, c] = parts
-    if (c.length === 2) c = '20' + c
-    if (parseInt(a) <= 31 && parseInt(b) <= 12) {
-      return `${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`
-    }
-  }
-  const parts2 = dateStr.split('-')
-  if (parts2.length === 3 && parts2[0].length === 2) {
-    return `${parts2[2]}-${parts2[1]}-${parts2[0]}`
-  }
-  const d = new Date(dateStr)
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  return ''
-}
+
 
 function getDefaultDay() {
   try {
