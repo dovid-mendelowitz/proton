@@ -98,7 +98,7 @@ function saveMapping(accountKey, mapping, headers) {
   } catch {}
 }
 
-function findBestRule(businessEntity, context = {}) {
+function findBestRule(businessEntity, context = {}, ignoreConstraints = false) {
   if (!businessEntity) return null
   const rules = db.prepare(`
     SELECT r.*, c.name as category_name FROM Automation_Rules r
@@ -107,7 +107,10 @@ function findBestRule(businessEntity, context = {}) {
       AND r.category_id IS NOT NULL
       AND COALESCE(r.enabled, 1) = 1
   `).all()
-  return findBestMerchantRule(businessEntity, filterEligibleRules(rules, context))
+  return findBestMerchantRule(
+    businessEntity,
+    ignoreConstraints ? rules : filterEligibleRules(rules, context)
+  )
 }
 
 function Import({ onNavigate }) {
@@ -277,8 +280,12 @@ function Import({ onNavigate }) {
       let categoryId = null
       let categoryName = null
       let autoDetected = false
+      let ruleOutOfScope = false
       if (rawBusiness) {
-        const rule = findBestRule(rawBusiness, { accountId, amount, date: parseDate(rawDateStr) || null })
+        const context = { accountId, amount, date: parseDate(rawDateStr) || null }
+        const rule = findBestRule(rawBusiness, context)
+        const nameOnlyRule = rule || findBestRule(rawBusiness, {}, true)
+        ruleOutOfScope = !rule && Boolean(nameOnlyRule)
         if (rule) {
           categoryId = rule.category_id
           categoryName = rule.category_name ?? categories.find(c => c.id === rule.category_id)?.name ?? null
@@ -289,7 +296,7 @@ function Import({ onNavigate }) {
       return {
         rawDate, rawBusiness, valueDate, details,
         amount, txType, accountId, accountName,
-        isDuplicate, categoryId, categoryName, autoDetected,
+        isDuplicate, categoryId, categoryName, autoDetected, ruleOutOfScope,
         usedFallbackDate: !parseDate(rawDateStr),
       }
     }).filter(r => r.amount > 0)
@@ -729,7 +736,14 @@ function Import({ onNavigate }) {
                 React.createElement('td', { style: styles.td },
                   row.isDuplicate
                     ? React.createElement('span', { style: { color: '#F59E0B', fontSize: 12 } }, '⚠ כפולה')
-                    : React.createElement('span', { style: { color: '#10B981', fontSize: 12 } }, '✓ חדשה')
+                    : row.ruleOutOfScope
+                      ? React.createElement('span', {
+                          style: { color: '#B45309', fontSize: 11, whiteSpace: 'nowrap' },
+                          title: 'נמצא כלל לבית העסק, אך תנאי החשבון, הסכום או התאריך אינם מתקיימים',
+                        }, '⚠ חריגה מכלל')
+                      : row.autoDetected
+                        ? React.createElement('span', { style: { color: '#2563EB', fontSize: 12 } }, '🤖 סווגה')
+                        : React.createElement('span', { style: { color: '#10B981', fontSize: 12 } }, '✓ חדשה')
                 ),
               )
             )
