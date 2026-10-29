@@ -9,6 +9,7 @@ function makeDatabase() {
     CREATE TABLE Accounts (id INTEGER PRIMARY KEY);
     CREATE TABLE Transactions (id INTEGER PRIMARY KEY);
     CREATE TABLE Assets (id INTEGER PRIMARY KEY);
+    CREATE TABLE Automation_Rules (id INTEGER PRIMARY KEY, original_string TEXT, cleaned_name TEXT, category_id INTEGER, match_type TEXT, priority INTEGER, use_count INTEGER);
     CREATE TABLE Insurance_Policies (id INTEGER PRIMARY KEY);
     CREATE TABLE Liabilities (id INTEGER PRIMARY KEY);
     CREATE TABLE Recurring_Templates (id INTEGER PRIMARY KEY);
