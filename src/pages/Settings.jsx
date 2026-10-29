@@ -449,30 +449,86 @@ function Settings() {
 
 function EditRuleModal({ rule, onClose, onSave }) {
   const categories = db.prepare('SELECT * FROM Categories WHERE is_active=1 ORDER BY sort_order').all()
+  const accounts = db.prepare('SELECT id, name FROM Accounts WHERE is_active=1 ORDER BY name').all()
   const [categoryId, setCategoryId] = useState(rule.category_id?.toString() ?? '')
   const [cleanedName, setCleanedName] = useState(rule.cleaned_name || rule.original_string)
+  const [accountId, setAccountId] = useState(rule.account_id?.toString() ?? '')
+  const [minAmount, setMinAmount] = useState(rule.min_amount == null ? '' : String(rule.min_amount))
+  const [maxAmount, setMaxAmount] = useState(rule.max_amount == null ? '' : String(rule.max_amount))
+  const [validFrom, setValidFrom] = useState(rule.valid_from || '')
+  const [validTo, setValidTo] = useState(rule.valid_to || '')
+  const [enabled, setEnabled] = useState(rule.enabled !== 0)
 
   function handleSave() {
-    db.prepare('UPDATE Automation_Rules SET category_id=?, cleaned_name=? WHERE id=?')
-      .run(categoryId || null, cleanedName, rule.id)
+    const min = minAmount === '' ? null : Number(minAmount)
+    const max = maxAmount === '' ? null : Number(maxAmount)
+    if (min != null && (!Number.isFinite(min) || min < 0)) { alert('סכום מינימום חייב להיות מספר חיובי'); return }
+    if (max != null && (!Number.isFinite(max) || max < 0)) { alert('סכום מקסימום חייב להיות מספר חיובי'); return }
+    if (min != null && max != null && min > max) { alert('סכום מינימום לא יכול להיות גבוה מסכום מקסימום'); return }
+    if (validFrom && validTo && validFrom > validTo) { alert('תאריך התחלה לא יכול להיות אחרי תאריך הסיום'); return }
+
+    db.prepare(`
+      UPDATE Automation_Rules
+      SET category_id=?, cleaned_name=?, account_id=?, min_amount=?, max_amount=?,
+          valid_from=?, valid_to=?, enabled=?
+      WHERE id=?
+    `).run(
+      categoryId || null, cleanedName.trim(), accountId || null, min, max,
+      validFrom || null, validTo || null, enabled ? 1 : 0, rule.id
+    )
     onSave()
   }
 
   return React.createElement('div', { style: styles.overlay },
-    React.createElement('div', { style: { ...styles.modal, maxWidth: 420 } },
+    React.createElement('div', { style: { ...styles.modal, maxWidth: 480 } },
       React.createElement('div', { style: styles.modalHeader },
         React.createElement('h2', { style: styles.modalTitle }, 'עריכת חוק זיהוי'),
         React.createElement('button', { style: styles.closeBtn, onClick: onClose }, '✕'),
       ),
-      React.createElement('div', { style: styles.modalBody },
+      React.createElement('div', { style: { ...styles.modalBody, maxHeight: '70vh', overflowY: 'auto' } },
         React.createElement('p', { style: { fontSize: 12, color: '#64748B', marginBottom: 16, backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8 } },
           `שם מקורי: ${rule.original_string}`
         ),
-        Field('שם נקי (כפי שיוצג)', React.createElement('input', { style: styles.input, value: cleanedName, onChange: e => setCleanedName(e.target.value) })),
-        Field('קטגוריה', React.createElement('select', { style: styles.input, value: categoryId, onChange: e => setCategoryId(e.target.value) },
+        Field('שם נקי (כפי שיוצג)', React.createElement('input', {
+          style: styles.input, value: cleanedName, onChange: e => setCleanedName(e.target.value)
+        })),
+        Field('קטגוריה', React.createElement('select', {
+          style: styles.input, value: categoryId, onChange: e => setCategoryId(e.target.value)
+        },
           React.createElement('option', { value: '' }, '— ללא קטגוריה —'),
           categories.map(c => React.createElement('option', { key: c.id, value: c.id }, `${c.name} ${c.icon || ''}`))
         )),
+        React.createElement('p', { style: { fontSize: 12, fontWeight: '600', color: '#334155', margin: '12px 0 8px' } }, 'תנאי התאמה (אופציונליים)'),
+        Field('חשבון', React.createElement('select', {
+          style: styles.input, value: accountId, onChange: e => setAccountId(e.target.value)
+        },
+          React.createElement('option', { value: '' }, 'כל החשבונות'),
+          accounts.map(a => React.createElement('option', { key: a.id, value: String(a.id) }, a.name))
+        )),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+          Field('סכום מינימום (₪)', React.createElement('input', {
+            style: styles.input, type: 'number', min: 0, step: '0.01', value: minAmount,
+            onChange: e => setMinAmount(e.target.value), placeholder: 'ללא הגבלה'
+          })),
+          Field('סכום מקסימום (₪)', React.createElement('input', {
+            style: styles.input, type: 'number', min: 0, step: '0.01', value: maxAmount,
+            onChange: e => setMaxAmount(e.target.value), placeholder: 'ללא הגבלה'
+          })),
+        ),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+          Field('מתאריך', React.createElement('input', {
+            style: styles.input, type: 'date', value: validFrom, onChange: e => setValidFrom(e.target.value)
+          })),
+          Field('עד תאריך', React.createElement('input', {
+            style: styles.input, type: 'date', value: validTo, onChange: e => setValidTo(e.target.value)
+          })),
+        ),
+        Field('החוק פעיל', React.createElement('input', {
+          type: 'checkbox', checked: enabled, onChange: e => setEnabled(e.target.checked)
+        })),
+        React.createElement('p', { style: { fontSize: 11, color: '#64748B', marginTop: -4 } },
+          'החוק מציע קטגוריה רק כשהתנאים מתקיימים. הוא אינו מאשר או מייבא תנועות אוטומטית.'
+        ),
       ),
       React.createElement('div', { style: styles.modalFooter },
         React.createElement('button', { style: styles.btnSecondary, onClick: onClose }, 'ביטול'),
