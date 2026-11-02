@@ -1,4 +1,5 @@
 name: Windows installer
+# Builds a Windows NSIS installer and publishes it as a workflow artifact for testing.
 
 on:
   push:
