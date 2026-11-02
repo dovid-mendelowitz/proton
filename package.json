@@ -35,7 +35,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "excelnik",
+      "owner": "dovid-mendelowitz",
       "repo": "proton"
     }
   },
