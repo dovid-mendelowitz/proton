@@ -1,6 +1,6 @@
 # פרוטון — מערכת ניהול פיננסי אישי 💰
 
-> גרסת בטא פעילה | הפרויקט בפיתוח פתוח
+> גרסה 0.3.2 | פרויקט אישי בפיתוח
 
 אפליקציית דסקטופ לניהול פיננסי אישי, בנויה עם Electron + React + SQLite. כל הנתונים נשמרים מקומית על המחשב — ללא ענן, ללא שרתים חיצוניים, ללא מנוי.
 
@@ -16,7 +16,7 @@
 
 ```bash
 # שכפל את הפרויקט
-git clone https://github.com/excelnik/proton.git
+git clone https://github.com/dovid-mendelowitz/proton.git
 cd proton
 
 # התקן תלויות
