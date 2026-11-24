@@ -1,3 +1,4 @@
+# Also kept on the default branch to enable manual workflow dispatch.
 name: Publish Windows release
 
 on:
