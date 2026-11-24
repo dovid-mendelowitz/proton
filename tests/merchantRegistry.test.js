@@ -10,7 +10,7 @@ function makeDb() {
   const db = new Database(':memory:')
   db.exec(`
     CREATE TABLE Accounts (id INTEGER PRIMARY KEY);
-    CREATE TABLE Transactions (id INTEGER PRIMARY KEY);
+    CREATE TABLE Transactions (id INTEGER PRIMARY KEY, transaction_date TEXT, account_id INTEGER, amount REAL, transaction_type TEXT, business_entity TEXT);
     CREATE TABLE Assets (id INTEGER PRIMARY KEY);
     CREATE TABLE Automation_Rules (id INTEGER PRIMARY KEY, original_string TEXT, cleaned_name TEXT, category_id INTEGER, match_type TEXT, priority INTEGER, use_count INTEGER);
     CREATE TABLE Insurance_Policies (id INTEGER PRIMARY KEY);
