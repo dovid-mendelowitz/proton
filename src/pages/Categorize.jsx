@@ -182,8 +182,7 @@ function Categorize() {
               ))
             )
           )
-        )
-    ),
+        ),
     filtered.length > displayed.length && React.createElement('div', {
       style: { display: 'flex', justifyContent: 'center', padding: 14 }
     },
