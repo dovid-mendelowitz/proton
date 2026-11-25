@@ -163,7 +163,7 @@ function backupAndReplace(buffer) {
 
   const temp = dbPath + '.download'
   fs.writeFileSync(temp, buffer)
-  if (buffer.subarray(0, 16).toString('binary') !== 'SQLite format 3\\0') {
+  if (buffer.subarray(0, 16).toString('binary') !== 'SQLite format 3\0') {
     fs.rmSync(temp, { force: true })
     throw new Error('הקובץ שהתקבל מ-GitHub אינו מסד נתונים תקין')
   }
