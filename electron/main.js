@@ -239,29 +239,55 @@ ipcMain.handle('import-db', async (event, destPath) => {
 
 // ──── מחיקת בטוחה של נתונים + סגירה (ללא הסרה אוטומטית) ────
 ipcMain.handle('safe-delete-db', async (event, dbPath) => {
+  let backupDir = null
   try {
     // הגנה: הפעולה מיועדת רק למסד הנתונים של פרוטון.
     if (path.basename(dbPath) !== 'proton.db' || path.basename(path.dirname(dbPath)) !== 'proton') {
       return { success: false, error: 'נתיב מסד הנתונים אינו הנתיב המוכר של פרוטון' }
     }
     const dbDir = path.dirname(dbPath)
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true })
-      return { success: true, backupPath: null, message: 'נוצרה תיקיית נתונים חדשה' }
+
+    if (fs.existsSync(dbDir)) {
+      // לא מוחקים: מעבירים את כל התיקייה (DB, WAL, SHM וקובצי עזר) לגיבוי מתוארך.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp)
+      let suffix = 1
+      while (fs.existsSync(backupDir)) {
+        backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp + '_' + suffix++)
+      }
+      fs.renameSync(dbDir, backupDir)
     }
 
-    // לא מוחקים: מעבירים את כל התיקייה (DB, WAL, SHM וקובצי עזר) לגיבוי מתוארך.
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    let backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp)
-    let suffix = 1
-    while (fs.existsSync(backupDir)) {
-      backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp + '_' + suffix++)
-    }
-    fs.renameSync(dbDir, backupDir)
     fs.mkdirSync(dbDir, { recursive: true })
 
-    return { success: true, backupPath: backupDir, message: 'הנתונים הישנים נשמרו בגיבוי ונוצרה תיקייה נקייה' }
+    // Create a real, initialized empty database before quitting. Startup sync
+    // runs before the renderer initializes SQLite; without this file it would
+    // mistake the intentional reset for a new device and restore the old cloud DB.
+    const dbModulePath = require.resolve('../src/db/index.js')
+    delete require.cache[dbModulePath]
+    const freshDb = require(dbModulePath)
+    try {
+      freshDb.pragma('wal_checkpoint(TRUNCATE)')
+    } finally {
+      freshDb.close()
+      delete require.cache[dbModulePath]
+    }
+
+    return {
+      success: true,
+      backupPath: backupDir,
+      message: 'הנתונים הישנים נשמרו בגיבוי ונוצר מסד נתונים חדש ומוכן לסנכרון',
+    }
   } catch (e) {
+    // If initialization of the new DB fails, restore the old directory instead
+    // of leaving the user with an unusable empty data folder.
+    try {
+      const dbDir = path.dirname(dbPath)
+      if (fs.existsSync(dbDir)) fs.rmSync(dbDir, { recursive: true, force: true })
+      if (backupDir && fs.existsSync(backupDir)) fs.renameSync(backupDir, dbDir)
+    } catch (restoreError) {
+      return { success: false, error: e.message + '; שחזור הגיבוי נכשל: ' + restoreError.message }
+    }
     return { success: false, error: e.message }
   }
 })
