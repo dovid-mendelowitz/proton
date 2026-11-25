@@ -127,7 +127,7 @@ function IndirectSavingsPanel() {
             monthly.map(item => React.createElement('tr', { key: item.month, style: { borderBottom: '1px solid #F1F5F9' } },
               React.createElement('td', { style: { padding: '7px 5px', color: '#334155' } }, monthLabel(item.month)),
               React.createElement('td', { style: { padding: '7px 5px', color: '#047857', fontWeight: 600 } }, money(item.amount)),
-              React.createElement('td', { style: { padding: '7px 5px', color: '#334155' } }, money(item.cumulative))))))),
+              React.createElement('td', { style: { padding: '7px 5px', color: '#334155' } }, money(item.cumulative)))))))),
     React.createElement('div', { style: { borderTop: '1px solid #E2E8F0', paddingTop: 10 } },
       React.createElement('h3', { style: { fontSize: 13, color: '#334155', margin: '0 0 7px' } }, 'רשומות חיסכון'),
       rows.length === 0
