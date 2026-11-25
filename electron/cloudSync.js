@@ -152,21 +152,32 @@ async function uploadDatabase(token, buffer, remoteSha = null) {
 function backupAndReplace(buffer) {
   const dbPath = DB_PATH()
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  let backup = null
+
   if (fs.existsSync(dbPath)) {
     checkpointDatabase()
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const backup = path.join(path.dirname(dbPath), 'proton-before-cloud-sync-' + stamp + '.db')
+    backup = path.join(path.dirname(dbPath), 'proton-before-cloud-sync-' + stamp + '.db')
     fs.copyFileSync(dbPath, backup)
   }
+
   const temp = dbPath + '.download'
   fs.writeFileSync(temp, buffer)
-  if (buffer.subarray(0, 16).toString('binary') !== 'SQLite format 3\0') {
+  if (buffer.subarray(0, 16).toString('binary') !== 'SQLite format 3\\0') {
     fs.rmSync(temp, { force: true })
     throw new Error('הקובץ שהתקבל מ-GitHub אינו מסד נתונים תקין')
   }
-  fs.rmSync(dbPath + '-wal', { force: true })
-  fs.rmSync(dbPath + '-shm', { force: true })
-  fs.renameSync(temp, dbPath)
+
+  try {
+    fs.rmSync(dbPath + '-wal', { force: true })
+    fs.rmSync(dbPath + '-shm', { force: true })
+    fs.rmSync(dbPath, { force: true })
+    fs.renameSync(temp, dbPath)
+  } catch (error) {
+    fs.rmSync(temp, { force: true })
+    if (backup && !fs.existsSync(dbPath)) fs.copyFileSync(backup, dbPath)
+    throw error
+  }
 }
 
 async function saveToken(token) {
