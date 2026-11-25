@@ -93,18 +93,48 @@ function isDatabaseEmpty() {
   let db
   try {
     db = new Database(dbPath, { readonly: true, fileMustExist: true })
+
+    // Tables containing user-created financial data. Include tables that the
+    // previous check missed (budgets, custom rules, debt payments and snapshots).
     const tables = [
-      'Accounts', 'Transactions', 'Savings_Goals', 'Indirect_Savings',
-      'Recurring_Templates', 'Liabilities', 'Insurance_Policies', 'Assets', 'Informal_Debts',
+      'Accounts', 'Transactions', 'Budget_Goals', 'Savings_Goals',
+      'Indirect_Savings', 'Recurring_Templates', 'Liabilities',
+      'Insurance_Policies', 'Assets', 'Informal_Debts',
+      'Informal_Debt_Payments', 'Budget_Recurring_Imports',
+      'Net_Worth_Snapshots', 'Price_Cache', 'Merchant_Registry',
     ]
     for (const table of tables) {
       try {
         if (db.prepare('SELECT 1 FROM "' + table + '" LIMIT 1').get()) return false
       } catch {}
     }
+
+    // Settings/mapping rows are application metadata, not user transactions.
     try {
-      if (db.prepare('SELECT 1 FROM Categories WHERE is_system_category=0 LIMIT 1').get()) return false
+      if (db.prepare("SELECT 1 FROM Automation_Rules WHERE match_type NOT IN ('setting', 'mapping') LIMIT 1").get()) {
+        return false
+      }
     } catch {}
+
+    // A first launch seeds these built-in categories. They must not make an
+    // otherwise empty database look populated; renamed or custom categories do.
+    const builtInCategories = [
+      ['מזון ושתייה', 'Expense'], ['תחבורה', 'Expense'], ['מגורים', 'Expense'],
+      ['בריאות', 'Expense'], ['ביטוחים', 'Expense'], ['חינוך', 'Expense'],
+      ['בידור ופנאי', 'Expense'], ['תרומות וצדקה', 'Expense'],
+      ['תיקוני מערכת', 'Expense'], ['משכורת', 'Income'],
+      ['הכנסה נוספת', 'Income'], ['החזרים', 'Income'], ['מתנות', 'Income'],
+      ['קרן פנסיה', 'Savings'], ['קרן השתלמות', 'Savings'],
+      ['פיקדון', 'Savings'], ['תיק השקעות', 'Savings'], ['קרן חירום', 'Savings'],
+    ]
+    const builtInKeys = new Set(builtInCategories.map(([name, type]) => type + '\\0' + name))
+    try {
+      const categories = db.prepare('SELECT name, type, parent_id FROM Categories').all()
+      if (categories.some(row => row.parent_id != null || !builtInKeys.has(row.type + '\\0' + row.name))) {
+        return false
+      }
+    } catch {}
+
     return true
   } catch {
     return false
