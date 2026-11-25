@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
         type: 'warning',
         title: 'סנכרון נתונים',
         message: 'לא הצלחנו להשלים סנכרון נתונים מול GitHub.',
-        detail: (startupSyncResult.message || 'הנתונים המקומיים נשארו ללא שינוי.') + '\\n\\nהתוכנה תמשיך לפעול עם הנתונים המקומיים.',
+        detail: (startupSyncResult.message || 'הנתונים המקומיים נשארו ללא שינוי.') + '\n\nהתוכנה תמשיך לפעול עם הנתונים המקומיים.',
         buttons: ['הבנתי'],
       })
     })
