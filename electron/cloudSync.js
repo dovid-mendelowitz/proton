@@ -118,12 +118,17 @@ async function getRemote(token) {
     const endpoint = API_BASE + '/contents/' + DB_NAME + '?ref=main'
     const metadata = await request(endpoint, token)
     const item = JSON.parse(metadata.data.toString('utf8'))
-    const raw = await request(endpoint, token, { accept: 'application/vnd.github.raw+json' })
-    return { sha: item.sha, content: raw.data }
+    return { sha: item.sha }
   } catch (error) {
     if (error.statusCode === 404) return null
     throw error
   }
+}
+
+async function getRemoteContent(token) {
+  const endpoint = API_BASE + '/contents/' + DB_NAME + '?ref=main'
+  const raw = await request(endpoint, token, { accept: 'application/vnd.github.raw+json' })
+  return raw.data
 }
 
 async function uploadDatabase(token, buffer, remoteSha = null) {
@@ -199,8 +204,8 @@ async function syncAtStartup() {
     }
 
     if (!fs.existsSync(dbPath)) {
-      backupAndReplace(remote.content)
-      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(remote.content), lastSyncAt: new Date().toISOString() })
+      backupAndReplace(await getRemoteContent(token))
+      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(await getRemoteContent(token)), lastSyncAt: new Date().toISOString() })
       return { success: true, action: 'downloaded' }
     }
 
