@@ -100,6 +100,9 @@ function runMigrations(db) {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `)
+    ensureColumn(db, 'Indirect_Savings', 'frequency', "TEXT NOT NULL DEFAULT 'once'")
+    ensureColumn(db, 'Indirect_Savings', 'end_date', 'TEXT')
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS Informal_Debt_Payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
