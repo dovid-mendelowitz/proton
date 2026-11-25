@@ -39,6 +39,35 @@ function saveSetting(key, value) {
 }
 
 function Settings() {
+  const { ipcRenderer, shell } = require('electron')
+  const [githubToken, setGithubToken] = useState('')
+  const [cloudStatus, setCloudStatus] = useState({ configured: false, lastSyncAt: null })
+  const [cloudMessage, setCloudMessage] = useState('')
+  const [cloudBusy, setCloudBusy] = useState(false)
+
+  useEffect(() => {
+    ipcRenderer.invoke('cloud-sync-status').then(setCloudStatus).catch(error => setCloudMessage(error.message))
+  }, [])
+
+  async function saveCloudToken() {
+    if (!githubToken.trim()) {
+      setCloudMessage('יש להדביק GitHub Token')
+      return
+    }
+    setCloudBusy(true)
+    setCloudMessage('')
+    try {
+      const result = await ipcRenderer.invoke('cloud-sync-save-token', githubToken)
+      if (!result.success) throw new Error(result.error || 'שמירת ההתחברות נכשלה')
+      setCloudStatus(result.status)
+      setGithubToken('')
+      setCloudMessage('ההתחברות נשמרה. הסנכרון הראשון יתבצע בעת סגירת התוכנה או בפתיחתה הבאה.')
+    } catch (error) {
+      setCloudMessage('לא ניתן לשמור את ההתחברות: ' + error.message)
+    } finally {
+      setCloudBusy(false)
+    }
+  }
   const [defaultDay, setDefaultDay] = useState(() => getSetting(SETTINGS_KEYS.DEFAULT_DAY, '25'))
   const [dateMode, setDateMode] = useState(() => getSetting(SETTINGS_KEYS.DATE_MODE, 'transaction_date'))
   const [emergencyMonths, setEmergencyMonths] = useState(() => getSetting(SETTINGS_KEYS.EMERGENCY_MONTHS, '3'))
@@ -81,8 +110,6 @@ function Settings() {
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
-
-  const { ipcRenderer } = require('electron')
 
   async function handleExport() {
     try {
@@ -198,6 +225,36 @@ function Settings() {
   return React.createElement('div', { style: styles.page },
     React.createElement('h1', { style: styles.title }, 'הגדרות'),
 
+    // ── סנכרון בין מחשבים ──
+    React.createElement('div', { style: styles.section },
+      React.createElement('h2', { style: styles.sectionTitle }, 'סנכרון נתונים בין מחשבים'),
+      React.createElement('p', { style: styles.settingDesc }, 'הנתונים יסונכרנו דרך מאגר GitHub פרטי. בפתיחה נבדוק אם יש גרסה חדשה, וביציאה נעלה שינויים מקומיים.'),
+      React.createElement('p', { style: { ...styles.settingDesc, marginTop: 8, color: cloudStatus.configured ? '#047857' : '#B45309' } },
+        cloudStatus.configured ? 'התחברות ל-GitHub שמורה במחשב זה' : 'טרם הוגדרה התחברות במחשב זה'),
+      cloudStatus.lastSyncAt && React.createElement('p', { style: { ...styles.settingDesc, marginTop: 4 } },
+        'סנכרון אחרון: ' + new Date(cloudStatus.lastSyncAt).toLocaleString('he-IL')),
+      React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' } },
+        React.createElement('input', {
+          type: 'password',
+          autoComplete: 'off',
+          placeholder: 'הדבק כאן GitHub Fine-grained Token',
+          value: githubToken,
+          onChange: e => setGithubToken(e.target.value),
+          style: { ...styles.input, flex: '1 1 320px' },
+        }),
+        React.createElement('button', { style: styles.btnPrimary, disabled: cloudBusy, onClick: saveCloudToken },
+          cloudBusy ? 'שומר...' : 'שמור התחברות'),
+      ),
+      React.createElement('button', {
+        style: { ...styles.btnSecondary, marginTop: 10 },
+        onClick: () => shell.openExternal('https://github.com/settings/personal-access-tokens/new'),
+      }, 'צור Token ב-GitHub'),
+      React.createElement('p', { style: { ...styles.settingDesc, marginTop: 10, lineHeight: 1.7 } },
+        'בעת יצירת ה-Token יש לבחור: Repository access – Only select repositories – proton-data; וב-Permissions לבחור Contents: Read and write. יש להזין Token בכל מחשב בנפרד.'),
+      React.createElement('p', { style: { ...styles.settingDesc, marginTop: 6 } },
+        'ה-Token נשמר מוצפן במחשב באמצעות מנגנון האבטחה של Windows. מסד הנתונים עצמו נשמר במאגר הפרטי proton-data.'),
+      cloudMessage && React.createElement('p', { style: { color: cloudMessage.startsWith('לא ניתן') ? '#B91C1C' : '#047857', fontSize: 12, marginTop: 10 } }, cloudMessage),
+    ),
 
     // ── הגדרות תאריכים ──
     React.createElement('div', { style: styles.section },

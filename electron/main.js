@@ -5,6 +5,7 @@ const fs = require('fs')
 const { autoUpdater } = require('electron-updater')
 const { initCrashLogger } = require('../crashLogger')
 const Database = require('better-sqlite3')
+const cloudSync = require('./cloudSync')
 
 const DB_PATH = process.env.PROTON_DB_PATH || path.join(os.homedir(), 'AppData', 'Roaming', 'proton')
 initCrashLogger(DB_PATH)
@@ -127,9 +128,22 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+let startupSyncResult = null
+app.whenReady().then(async () => {
   createMenu()
+  startupSyncResult = await cloudSync.syncAtStartup()
   createWindow()
+  if (startupSyncResult && startupSyncResult.success === false) {
+    mainWindow.once('ready-to-show', () => {
+      dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'סנכרון נתונים',
+        message: 'לא הצלחנו להשלים סנכרון נתונים מול GitHub.',
+        detail: (startupSyncResult.message || 'הנתונים המקומיים נשארו ללא שינוי.') + '\n\nהתוכנה תמשיך לפעול עם הנתונים המקומיים.',
+        buttons: ['הבנתי'],
+      })
+    })
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -225,29 +239,60 @@ ipcMain.handle('import-db', async (event, destPath) => {
 
 // ──── מחיקת בטוחה של נתונים + סגירה (ללא הסרה אוטומטית) ────
 ipcMain.handle('safe-delete-db', async (event, dbPath) => {
+  let backupDir = null
   try {
     // הגנה: הפעולה מיועדת רק למסד הנתונים של פרוטון.
     if (path.basename(dbPath) !== 'proton.db' || path.basename(path.dirname(dbPath)) !== 'proton') {
       return { success: false, error: 'נתיב מסד הנתונים אינו הנתיב המוכר של פרוטון' }
     }
     const dbDir = path.dirname(dbPath)
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true })
-      return { success: true, backupPath: null, message: 'נוצרה תיקיית נתונים חדשה' }
+
+    if (fs.existsSync(dbDir)) {
+      // לא מוחקים: מעבירים את כל התיקייה (DB, WAL, SHM וקובצי עזר) לגיבוי מתוארך.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp)
+      let suffix = 1
+      while (fs.existsSync(backupDir)) {
+        backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp + '_' + suffix++)
+      }
+      fs.renameSync(dbDir, backupDir)
     }
 
-    // לא מוחקים: מעבירים את כל התיקייה (DB, WAL, SHM וקובצי עזר) לגיבוי מתוארך.
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    let backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp)
-    let suffix = 1
-    while (fs.existsSync(backupDir)) {
-      backupDir = path.join(path.dirname(dbDir), 'proton_backup_' + stamp + '_' + suffix++)
-    }
-    fs.renameSync(dbDir, backupDir)
     fs.mkdirSync(dbDir, { recursive: true })
 
-    return { success: true, backupPath: backupDir, message: 'הנתונים הישנים נשמרו בגיבוי ונוצרה תיקייה נקייה' }
+    // Create a real, initialized empty database before quitting. Startup sync
+    // runs before the renderer initializes SQLite; without this file it would
+    // mistake the intentional reset for a new device and restore the old cloud DB.
+    const dbModulePath = require.resolve('../src/db/index.js')
+    delete require.cache[dbModulePath]
+    const freshDb = require(dbModulePath)
+    try {
+      freshDb.pragma('wal_checkpoint(TRUNCATE)')
+    } finally {
+      freshDb.close()
+      delete require.cache[dbModulePath]
+    }
+
+    // Persist reset intent outside the database directory. If GitHub is
+    // temporarily unavailable, startup/exit sync will retry without restoring
+    // the previous cloud database over this intentional reset.
+    cloudSync.markIntentionalReset()
+
+    return {
+      success: true,
+      backupPath: backupDir,
+      message: 'הנתונים הישנים נשמרו בגיבוי ונוצר מסד נתונים חדש ומוכן לסנכרון',
+    }
   } catch (e) {
+    // If initialization of the new DB fails, restore the old directory instead
+    // of leaving the user with an unusable empty data folder.
+    try {
+      const dbDir = path.dirname(dbPath)
+      if (fs.existsSync(dbDir)) fs.rmSync(dbDir, { recursive: true, force: true })
+      if (backupDir && fs.existsSync(backupDir)) fs.renameSync(backupDir, dbDir)
+    } catch (restoreError) {
+      return { success: false, error: e.message + '; שחזור הגיבוי נכשל: ' + restoreError.message }
+    }
     return { success: false, error: e.message }
   }
 })
@@ -257,4 +302,56 @@ ipcMain.on('quit-app', () => {
   // סגור את האפליקציה בלבד
   // לא נריץ Uninstall Pruton.exe — תן למשתמש להסיר באופן ידני
   app.quit()
+})
+
+
+// ──── סנכרון GitHub ────
+ipcMain.handle('cloud-sync-status', () => cloudSync.getStatus())
+
+ipcMain.handle('cloud-sync-save-token', async (event, token) => {
+  try {
+    await cloudSync.saveToken(token)
+    return { success: true, status: cloudSync.getStatus() }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+
+let cloudQuitStarted = false
+let allowQuitAfterSync = false
+app.on('before-quit', event => {
+  if (allowQuitAfterSync || !cloudSync.hasSavedToken()) return
+  event.preventDefault()
+  if (cloudQuitStarted) return
+  cloudQuitStarted = true
+
+  const finishQuit = async () => {
+    const result = await cloudSync.syncOnExit()
+    if (!result.success) {
+      await dialog.showMessageBox({
+        type: 'warning',
+        title: 'סנכרון לא הושלם',
+        message: 'לא הצלחנו לסנכרן את הנתונים ל-GitHub.',
+        detail: (result.message || 'הנתונים נשארו במחשב הזה ולא נמחקו.') + '\\n\\nאפשר להפעיל שוב את פרוטון ולנסות שנית.',
+        buttons: ['סגור את התוכנה'],
+      })
+    }
+    allowQuitAfterSync = true
+    app.quit()
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const timeout = setTimeout(() => {
+      ipcMain.removeListener('cloud-sync-db-closed', onDatabaseClosed)
+      finishQuit()
+    }, 5000)
+    const onDatabaseClosed = () => {
+      clearTimeout(timeout)
+      finishQuit()
+    }
+    ipcMain.once('cloud-sync-db-closed', onDatabaseClosed)
+    mainWindow.webContents.send('prepare-for-cloud-sync')
+  } else {
+    finishQuit()
+  }
 })
