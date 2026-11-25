@@ -238,6 +238,18 @@ async function syncAtStartup() {
   try {
     const remote = await getRemote(token)
     const dbPath = DB_PATH()
+    const state = readState()
+
+    // An explicit user reset takes precedence over ordinary conflict detection.
+    // Keep the marker until GitHub confirms the replacement upload.
+    if (state && state.pendingReset) {
+      if (!fs.existsSync(dbPath)) {
+        return { success: false, message: 'האיפוס סומן אך מסד הנתונים החדש עדיין לא נוצר. לא הורדתי נתונים ישנים מהענן.' }
+      }
+      checkpointDatabase()
+      return await uploadDatabase(token, fs.readFileSync(dbPath), remote ? remote.sha : null)
+    }
+
     if (!remote) {
       if (!fs.existsSync(dbPath)) return { success: true, skipped: true }
       checkpointDatabase()
@@ -254,8 +266,6 @@ async function syncAtStartup() {
     checkpointDatabase()
     const local = fs.readFileSync(dbPath)
     const localSha = gitBlobSha(local)
-    const state = readState()
-
     if (!state) {
       if (!isDatabaseEmpty()) {
         return { success: false, conflict: true, message: 'נמצאו נתונים מקומיים וגם נתונים ב-GitHub, אך אין היסטוריית סנכרון. לא שיניתי אף אחד מהם.' }
@@ -294,12 +304,20 @@ async function syncOnExit() {
   try {
     checkpointDatabase()
     const dbPath = DB_PATH()
-    if (!fs.existsSync(dbPath)) return { success: true, skipped: true }
+    const state = readState()
+    if (!fs.existsSync(dbPath)) {
+      if (state && state.pendingReset) {
+        return { success: false, message: 'האיפוס סומן אך מסד הנתונים החדש חסר. לא בוצע סנכרון.' }
+      }
+      return { success: true, skipped: true }
+    }
     const local = fs.readFileSync(dbPath)
     const localSha = gitBlobSha(local)
-    const state = readState()
     const remote = await getRemote(token)
 
+    if (state && state.pendingReset) {
+      return await uploadDatabase(token, local, remote ? remote.sha : null)
+    }
     if (!remote) return await uploadDatabase(token, local)
     if (!state) {
       if (isDatabaseEmpty()) {
@@ -322,10 +340,20 @@ async function syncOnExit() {
   }
 }
 
+function markIntentionalReset() {
+  const previous = readState() || {}
+  writeState({
+    ...previous,
+    pendingReset: true,
+    resetRequestedAt: new Date().toISOString(),
+  })
+}
+
 module.exports = {
   saveToken,
   getStatus,
   syncAtStartup,
   syncOnExit,
+  markIntentionalReset,
   hasSavedToken: () => Boolean(readToken()),
 }
