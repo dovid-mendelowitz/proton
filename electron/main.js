@@ -273,6 +273,11 @@ ipcMain.handle('safe-delete-db', async (event, dbPath) => {
       delete require.cache[dbModulePath]
     }
 
+    // Persist reset intent outside the database directory. If GitHub is
+    // temporarily unavailable, startup/exit sync will retry without restoring
+    // the previous cloud database over this intentional reset.
+    cloudSync.markIntentionalReset()
+
     return {
       success: true,
       backupPath: backupDir,
