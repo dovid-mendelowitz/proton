@@ -5,6 +5,7 @@ const fs = require('fs')
 const { autoUpdater } = require('electron-updater')
 const { initCrashLogger } = require('../crashLogger')
 const Database = require('better-sqlite3')
+const cloudSync = require('./cloudSync')
 
 const DB_PATH = process.env.PROTON_DB_PATH || path.join(os.homedir(), 'AppData', 'Roaming', 'proton')
 initCrashLogger(DB_PATH)
@@ -127,9 +128,22 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+let startupSyncResult = null
+app.whenReady().then(async () => {
   createMenu()
+  startupSyncResult = await cloudSync.syncAtStartup()
   createWindow()
+  if (startupSyncResult && startupSyncResult.success === false) {
+    mainWindow.once('ready-to-show', () => {
+      dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'סנכרון נתונים',
+        message: 'לא הצלחנו להשלים סנכרון נתונים מול GitHub.',
+        detail: (startupSyncResult.message || 'הנתונים המקומיים נשארו ללא שינוי.') + '\\n\\nהתוכנה תמשיך לפעול עם הנתונים המקומיים.',
+        buttons: ['הבנתי'],
+      })
+    })
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -257,4 +271,56 @@ ipcMain.on('quit-app', () => {
   // סגור את האפליקציה בלבד
   // לא נריץ Uninstall Pruton.exe — תן למשתמש להסיר באופן ידני
   app.quit()
+})
+
+
+// ──── סנכרון GitHub ────
+ipcMain.handle('cloud-sync-status', () => cloudSync.getStatus())
+
+ipcMain.handle('cloud-sync-save-token', async (event, token) => {
+  try {
+    await cloudSync.saveToken(token)
+    return { success: true, status: cloudSync.getStatus() }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+
+let cloudQuitStarted = false
+let allowQuitAfterSync = false
+app.on('before-quit', event => {
+  if (allowQuitAfterSync || !cloudSync.hasSavedToken()) return
+  event.preventDefault()
+  if (cloudQuitStarted) return
+  cloudQuitStarted = true
+
+  const finishQuit = async () => {
+    const result = await cloudSync.syncOnExit()
+    if (!result.success) {
+      await dialog.showMessageBox({
+        type: 'warning',
+        title: 'סנכרון לא הושלם',
+        message: 'לא הצלחנו לסנכרן את הנתונים ל-GitHub.',
+        detail: (result.message || 'הנתונים נשארו במחשב הזה ולא נמחקו.') + '\\n\\nאפשר להפעיל שוב את פרוטון ולנסות שנית.',
+        buttons: ['סגור את התוכנה'],
+      })
+    }
+    allowQuitAfterSync = true
+    app.quit()
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const timeout = setTimeout(() => {
+      ipcMain.removeListener('cloud-sync-db-closed', onDatabaseClosed)
+      finishQuit()
+    }, 5000)
+    const onDatabaseClosed = () => {
+      clearTimeout(timeout)
+      finishQuit()
+    }
+    ipcMain.once('cloud-sync-db-closed', onDatabaseClosed)
+    mainWindow.webContents.send('prepare-for-cloud-sync')
+  } else {
+    finishQuit()
+  }
 })
