@@ -204,8 +204,9 @@ async function syncAtStartup() {
     }
 
     if (!fs.existsSync(dbPath)) {
-      backupAndReplace(await getRemoteContent(token))
-      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(await getRemoteContent(token)), lastSyncAt: new Date().toISOString() })
+      const content = await getRemoteContent(token)
+      backupAndReplace(content)
+      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(content), lastSyncAt: new Date().toISOString() })
       return { success: true, action: 'downloaded' }
     }
 
