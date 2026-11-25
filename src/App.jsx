@@ -162,6 +162,23 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const { ipcRenderer } = require('electron')
+    const prepareForSync = () => {
+      try {
+        const db = require('./db/index.js')
+        try { db.pragma('wal_checkpoint(TRUNCATE)') } catch {}
+        db.close()
+      } catch (error) {
+        console.error('Could not close database before cloud sync:', error)
+      } finally {
+        ipcRenderer.send('cloud-sync-db-closed')
+      }
+    }
+    ipcRenderer.on('prepare-for-cloud-sync', prepareForSync)
+    return () => ipcRenderer.removeListener('prepare-for-cloud-sync', prepareForSync)
+  }, [])
+
+  useEffect(() => {
     const tabMap = {
       '1': 'dashboard',
       '2': 'transactions',
