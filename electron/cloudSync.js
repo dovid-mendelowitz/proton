@@ -218,8 +218,11 @@ async function syncAtStartup() {
       if (!isDatabaseEmpty()) {
         return { success: false, conflict: true, message: 'נמצאו נתונים מקומיים וגם נתונים ב-GitHub, אך אין היסטוריית סנכרון. לא שיניתי אף אחד מהם.' }
       }
-      backupAndReplace(remote.content)
-      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(remote.content), lastSyncAt: new Date().toISOString() })
+      const content = await getRemoteContent(token)
+
+      backupAndReplace(content)
+
+      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(content), lastSyncAt: new Date().toISOString() })
       return { success: true, action: 'downloaded' }
     }
 
@@ -230,8 +233,11 @@ async function syncAtStartup() {
       return await uploadDatabase(token, local, remote.sha)
     }
     if (remote.sha !== state.remoteSha && localSha === state.localDbSha) {
-      backupAndReplace(remote.content)
-      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(remote.content), lastSyncAt: new Date().toISOString() })
+      const content = await getRemoteContent(token)
+
+      backupAndReplace(content)
+
+      writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(content), lastSyncAt: new Date().toISOString() })
       return { success: true, action: 'downloaded' }
     }
     return { success: false, conflict: true, message: 'נמצאו שינויים גם במחשב הזה וגם ב-GitHub. כדי למנוע דריסת נתונים, הסנכרון נעצר.' }
@@ -255,8 +261,11 @@ async function syncOnExit() {
     if (!remote) return await uploadDatabase(token, local)
     if (!state) {
       if (isDatabaseEmpty()) {
-        backupAndReplace(remote.content)
-        writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(remote.content), lastSyncAt: new Date().toISOString() })
+        const content = await getRemoteContent(token)
+
+        backupAndReplace(content)
+
+        writeState({ remoteSha: remote.sha, localDbSha: gitBlobSha(content), lastSyncAt: new Date().toISOString() })
         return { success: true, action: 'downloaded' }
       }
       return { success: false, conflict: true, message: 'קיימים נתונים בענן ללא היסטוריית סנכרון. לא דרסתי נתונים.' }
