@@ -67,3 +67,5 @@ jobs:
             dist-app/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Trigger release build for v0.4.3-beta.6.
